@@ -29,7 +29,6 @@ const navGroups = [
       { to: '/tabela',      label: 'Obras',            icon: Building2,    adminOnly: false },
       { to: '/engenheiros', label: 'Engenheiros',      icon: Users,        adminOnly: false },
       { to: '/projecoes',   label: 'Faturamento 2026', icon: TrendingUp,   adminOnly: false },
-      { to: '/medicoes',    label: 'Medições',         icon: ClipboardList, adminOnly: false },
       { to: '/importar',    label: 'Importar',         icon: Upload,       adminOnly: false },
     ],
   },
