@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Layouts Alternativos — PAVCON</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Segoe UI', sans-serif; background: #f1f5f9; padding: 32px; }
+  h1 { text-align: center; color: #1e293b; font-size: 22px; margin-bottom: 8px; }
+  .subtitle { text-align: center; color: #64748b; font-size: 13px; margin-bottom: 40px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 32px; }
+
+  /* ---- LAYOUT CARD ---- */
+  .layout-card { background: white; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.10); }
+  .layout-label { padding: 16px 20px; font-size: 13px; font-weight: 700; color: #64748b; letter-spacing: 0.05em; background: #f8fafc; border-bottom: 1px solid #e2e8f0; display: flex; align-items: center; gap: 8px; }
+  .layout-label span.badge { font-size: 11px; font-weight: 800; background: #f97316; color: white; border-radius: 6px; padding: 2px 8px; }
+
+  /* ===== LAYOUT A: TOP NAV ===== */
+  .la { }
+  .la .topbar { background: white; border-bottom: 1px solid #e2e8f0; padding: 10px 20px; display: flex; align-items: center; gap: 0; }
+  .la .topbar .logo { font-size: 14px; font-weight: 800; color: #f97316; margin-right: 24px; }
+  .la .topbar .logo span { color: #1e293b; }
+  .la .topbar nav { display: flex; gap: 2px; flex: 1; }
+  .la .topbar nav a { font-size: 11px; color: #64748b; padding: 5px 10px; border-radius: 6px; text-decoration: none; white-space: nowrap; }
+  .la .topbar nav a.active { background: #fff7ed; color: #f97316; font-weight: 700; }
+  .la .topbar .avatar { width: 28px; height: 28px; border-radius: 50%; background: #f97316; color: white; font-size: 10px; font-weight: 700; display: flex; align-items: center; justify-content: center; margin-left: auto; }
+  .la .body { background: #f8fafc; padding: 16px; }
+  .la .kpis { display: grid; grid-template-columns: repeat(4,1fr); gap: 8px; margin-bottom: 12px; }
+  .la .kpi { background: white; border-radius: 10px; padding: 12px; border: 1px solid #e2e8f0; }
+  .la .kpi .num { font-size: 22px; font-weight: 800; color: #1e293b; }
+  .la .kpi .lbl { font-size: 9px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em; margin-top: 2px; }
+  .la .charts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .la .chart-box { background: white; border-radius: 10px; border: 1px solid #e2e8f0; padding: 12px; height: 90px; }
+  .la .chart-box .title { font-size: 9px; color: #94a3b8; font-weight: 600; margin-bottom: 8px; text-transform: uppercase; }
+  .la .bars { display: flex; align-items: flex-end; gap: 4px; height: 55px; }
+  .la .bar { border-radius: 3px 3px 0 0; width: 18px; }
+  .la .pie-mock { display: flex; align-items: center; gap: 10px; }
+  .la .pie-circle { width: 55px; height: 55px; border-radius: 50%; background: conic-gradient(#f97316 0 50%, #22c55e 50% 70%, #3b82f6 70% 80%, #ef4444 80% 100%); }
+  .la .legend { display: flex; flex-direction: column; gap: 3px; }
+  .la .legend-item { display: flex; align-items: center; gap: 4px; font-size: 8px; color: #64748b; }
+  .la .legend-dot { width: 7px; height: 7px; border-radius: 50%; }
+
+  /* ===== LAYOUT B: DARK MODE ===== */
+  .lb { }
+  .lb .frame { background: #0f172a; display: flex; height: 280px; }
+  .lb .sidebar { width: 72px; background: #0f172a; border-right: 1px solid #1e293b; padding: 12px 0; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  .lb .sidebar .logo-icon { width: 36px; height: 36px; background: #f97316; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: white; font-size: 14px; font-weight: 800; margin-bottom: 12px; }
+  .lb .sidebar .nav-icon { width: 36px; height: 36px; border-radius: 8px; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 14px; }
+  .lb .sidebar .nav-icon.active { background: #f97316; }
+  .lb .sidebar .nav-icon:not(.active) { color: #475569; }
+  .lb .content { flex: 1; padding: 16px; overflow: hidden; }
+  .lb .page-title { color: white; font-size: 14px; font-weight: 700; margin-bottom: 12px; }
+  .lb .kpis { display: grid; grid-template-columns: repeat(4,1fr); gap: 8px; margin-bottom: 12px; }
+  .lb .kpi { background: #1e293b; border-radius: 10px; padding: 10px 12px; border: 1px solid #334155; }
+  .lb .kpi .num { font-size: 20px; font-weight: 800; color: #f97316; }
+  .lb .kpi .lbl { font-size: 9px; color: #64748b; text-transform: uppercase; margin-top: 2px; }
+  .lb .kpi .sub { font-size: 8px; color: #22c55e; margin-top: 3px; }
+  .lb .charts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .lb .chart-box { background: #1e293b; border-radius: 10px; border: 1px solid #334155; padding: 12px; height: 100px; }
+  .lb .chart-title { font-size: 9px; color: #64748b; font-weight: 600; margin-bottom: 8px; text-transform: uppercase; }
+  .lb .dark-bars { display: flex; align-items: flex-end; gap: 5px; height: 65px; }
+  .lb .dark-bar { border-radius: 3px 3px 0 0; width: 18px; opacity: 0.9; }
+  .lb .line-mock { height: 60px; position: relative; overflow: hidden; }
+  .lb .line-mock svg { width: 100%; height: 100%; }
+
+  /* ===== LAYOUT C: KANBAN ===== */
+  .lc { }
+  .lc .frame { display: flex; height: 280px; background: #f8fafc; }
+  .lc .sidebar { width: 60px; background: #1e3a5f; display: flex; flex-direction: column; align-items: center; padding: 12px 0; gap: 8px; }
+  .lc .sidebar .logo-icon { width: 34px; height: 34px; background: #f97316; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: white; font-size: 12px; font-weight: 800; margin-bottom: 8px; }
+  .lc .sidebar .nav-dot { width: 32px; height: 32px; border-radius: 8px; background: rgba(255,255,255,0.08); display: flex; align-items: center; justify-content: center; font-size: 13px; }
+  .lc .sidebar .nav-dot.active { background: rgba(249,115,22,0.3); }
+  .lc .kanban-body { flex: 1; padding: 12px; display: flex; flex-direction: column; gap: 8px; overflow: hidden; }
+  .lc .kanban-header { display: flex; align-items: center; justify-content: space-between; }
+  .lc .kanban-header h2 { font-size: 13px; font-weight: 700; color: #1e293b; }
+  .lc .kanban-header .filters { display: flex; gap: 6px; }
+  .lc .kanban-header .filter-pill { font-size: 9px; background: white; border: 1px solid #e2e8f0; border-radius: 20px; padding: 3px 10px; color: #64748b; }
+  .lc .columns { display: grid; grid-template-columns: repeat(4,1fr); gap: 8px; flex: 1; overflow: hidden; }
+  .lc .col { background: #f1f5f9; border-radius: 10px; padding: 8px; display: flex; flex-direction: column; gap: 5px; overflow: hidden; }
+  .lc .col-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+  .lc .col-title { font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; }
+  .lc .col-count { font-size: 9px; font-weight: 700; background: white; border-radius: 10px; padding: 1px 6px; }
+  .lc .col.iniciar .col-title { color: #64748b; }
+  .lc .col.execucao .col-title { color: #3b82f6; }
+  .lc .col.paralisada .col-title { color: #ef4444; }
+  .lc .col.concluida .col-title { color: #22c55e; }
+  .lc .obra-card { background: white; border-radius: 8px; padding: 8px; border: 1px solid #e2e8f0; box-shadow: 0 1px 4px rgba(0,0,0,0.05); }
+  .lc .obra-card .card-title { font-size: 9px; font-weight: 700; color: #1e293b; margin-bottom: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .lc .obra-card .card-eng { font-size: 8px; color: #94a3b8; margin-bottom: 5px; }
+  .lc .obra-card .progress-bar { height: 4px; background: #e2e8f0; border-radius: 2px; margin-bottom: 3px; }
+  .lc .obra-card .progress-fill { height: 100%; border-radius: 2px; }
+  .lc .obra-card .card-bottom { display: flex; justify-content: space-between; font-size: 8px; color: #64748b; }
+</style>
+</head>
+<body>
+
+<h1>Layouts Alternativos — PAVCON</h1>
+<p class="subtitle">Escolha o estilo visual preferido para o sistema de gestão de obras</p>
+
+<div class="grid">
+
+  <!-- LAYOUT A -->
+  <div class="layout-card">
+    <div class="layout-label">
+      <span class="badge">A</span> Top Navigation — Horizontal
+    </div>
+    <div class="la">
+      <div class="topbar">
+        <div class="logo">pav<span>con</span></div>
+        <nav>
+          <a href="#" class="active">Dashboard</a>
+          <a href="#">Tabela</a>
+          <a href="#">Indicadores</a>
+          <a href="#">Projeções</a>
+          <a href="#">Aprovações</a>
+        </nav>
+        <div class="avatar">VB</div>
+      </div>
+      <div class="body">
+        <div class="kpis">
+          <div class="kpi"><div class="num">10</div><div class="lbl">Total obras</div></div>
+          <div class="kpi"><div class="num">5</div><div class="lbl">Em execução</div></div>
+          <div class="kpi"><div class="num">1</div><div class="lbl">Concluídas</div></div>
+          <div class="kpi"><div class="num">4</div><div class="lbl">Engenheiros</div></div>
+        </div>
+        <div class="charts">
+          <div class="chart-box">
+            <div class="title">Distribuição por Status</div>
+            <div class="pie-mock">
+              <div class="pie-circle"></div>
+              <div class="legend">
+                <div class="legend-item"><div class="legend-dot" style="background:#f97316"></div>Execução</div>
+                <div class="legend-item"><div class="legend-dot" style="background:#22c55e"></div>Concluída</div>
+                <div class="legend-item"><div class="legend-dot" style="background:#3b82f6"></div>A iniciar</div>
+                <div class="legend-item"><div class="legend-dot" style="background:#ef4444"></div>Paralisada</div>
+              </div>
+            </div>
+          </div>
+          <div class="chart-box">
+            <div class="title">Obras por Região</div>
+            <div class="bars">
+              <div class="bar" style="height:70%;background:#3b82f6"></div>
+              <div class="bar" style="height:55%;background:#3b82f6"></div>
+              <div class="bar" style="height:45%;background:#3b82f6"></div>
+              <div class="bar" style="height:35%;background:#3b82f6"></div>
+              <div class="bar" style="height:25%;background:#3b82f6"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- LAYOUT B -->
+  <div class="layout-card">
+    <div class="layout-label">
+      <span class="badge">B</span> Dark Mode — Tema Escuro
+    </div>
+    <div class="lb">
+      <div class="frame">
+        <div class="sidebar">
+          <div class="logo-icon">P</div>
+          <div class="nav-icon active">⊞</div>
+          <div class="nav-icon">📊</div>
+          <div class="nav-icon">📋</div>
+          <div class="nav-icon">👷</div>
+          <div class="nav-icon">✓</div>
+        </div>
+        <div class="content">
+          <div class="page-title">Dashboard</div>
+          <div class="kpis">
+            <div class="kpi"><div class="num">10</div><div class="lbl">Obras</div><div class="sub">↑ 2 novas</div></div>
+            <div class="kpi"><div class="num">5</div><div class="lbl">Execução</div></div>
+            <div class="kpi"><div class="num">1</div><div class="lbl">Concluída</div></div>
+            <div class="kpi"><div class="num">R$11M</div><div class="lbl">Portfólio</div></div>
+          </div>
+          <div class="charts">
+            <div class="chart-box">
+              <div class="chart-title">Obras por Status</div>
+              <div class="dark-bars">
+                <div class="dark-bar" style="height:80%;background:#f97316"></div>
+                <div class="dark-bar" style="height:20%;background:#22c55e"></div>
+                <div class="dark-bar" style="height:30%;background:#3b82f6"></div>
+                <div class="dark-bar" style="height:10%;background:#ef4444"></div>
+              </div>
+            </div>
+            <div class="chart-box">
+              <div class="chart-title">Evolução Financeira</div>
+              <div class="line-mock">
+                <svg viewBox="0 0 120 60">
+                  <polyline points="0,50 20,42 40,35 60,25 80,20 100,12 120,8" fill="none" stroke="#f97316" stroke-width="2"/>
+                  <polyline points="0,55 20,50 40,46 60,40 80,36 100,30 120,25" fill="none" stroke="#3b82f6" stroke-width="1.5" stroke-dasharray="3,2"/>
+                </svg>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- LAYOUT C -->
+  <div class="layout-card">
+    <div class="layout-label">
+      <span class="badge">C</span> Kanban — Quadro por Status
+    </div>
+    <div class="lc">
+      <div class="frame">
+        <div class="sidebar">
+          <div class="logo-icon">P</div>
+          <div class="nav-dot active">⊞</div>
+          <div class="nav-dot">📋</div>
+          <div class="nav-dot">📊</div>
+          <div class="nav-dot">👷</div>
+          <div class="nav-dot">✓</div>
+        </div>
+        <div class="kanban-body">
+          <div class="kanban-header">
+            <h2>Quadro de Obras</h2>
+            <div class="filters">
+              <div class="filter-pill">Todos engenheiros ▾</div>
+              <div class="filter-pill">2024–2025 ▾</div>
+            </div>
+          </div>
+          <div class="columns">
+            <div class="col iniciar">
+              <div class="col-header"><span class="col-title">A Iniciar</span><span class="col-count">3</span></div>
+              <div class="obra-card">
+                <div class="card-title">Centro de Saúde Sul</div>
+                <div class="card-eng">Ana Lima</div>
+                <div class="progress-bar"><div class="progress-fill" style="width:0%;background:#64748b"></div></div>
+                <div class="card-bottom"><span>0%</span><span>R$850K</span></div>
+              </div>
+              <div class="obra-card">
+                <div class="card-title">Hospital Regional</div>
+                <div class="card-eng">Ana Lima</div>
+                <div class="progress-bar"><div class="progress-fill" style="width:0%;background:#64748b"></div></div>
+                <div class="card-bottom"><span>0%</span><span>R$1,6M</span></div>
+              </div>
+            </div>
+            <div class="col execucao">
+              <div class="col-header"><span class="col-title">Em Execução</span><span class="col-count">5</span></div>
+              <div class="obra-card">
+                <div class="card-title">UPA Norte</div>
+                <div class="card-eng">Carlos Mendes</div>
+                <div class="progress-bar"><div class="progress-fill" style="width:62%;background:#3b82f6"></div></div>
+                <div class="card-bottom"><span>62%</span><span>R$1,2M</span></div>
+              </div>
+              <div class="obra-card">
+                <div class="card-title">CAPS Leste</div>
+                <div class="card-eng">Fernanda Costa</div>
+                <div class="progress-bar"><div class="progress-fill" style="width:55%;background:#3b82f6"></div></div>
+                <div class="card-bottom"><span>55%</span><span>R$2,1M</span></div>
+              </div>
+            </div>
+            <div class="col paralisada">
+              <div class="col-header"><span class="col-title">Paralisada</span><span class="col-count">1</span></div>
+              <div class="obra-card">
+                <div class="card-title">Almoxarifado SESA</div>
+                <div class="card-eng">Ricardo Souza</div>
+                <div class="progress-bar"><div class="progress-fill" style="width:38%;background:#ef4444"></div></div>
+                <div class="card-bottom"><span>38%</span><span>R$490K</span></div>
+              </div>
+            </div>
+            <div class="col concluida">
+              <div class="col-header"><span class="col-title">Concluída</span><span class="col-count">1</span></div>
+              <div class="obra-card">
+                <div class="card-title">UBS Jardim América</div>
+                <div class="card-eng">Ricardo Souza</div>
+                <div class="progress-bar"><div class="progress-fill" style="width:100%;background:#22c55e"></div></div>
+                <div class="card-bottom"><span>100% ✓</span><span>R$285K</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<p style="text-align:center;margin-top:32px;font-size:12px;color:#94a3b8;">Selecione um layout para implementar no app</p>
+</body>
+</html>
