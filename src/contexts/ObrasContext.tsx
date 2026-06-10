@@ -27,21 +27,14 @@ const STORAGE_KEY  = 'pavcon_obras'
 const SNAP_KEY     = 'pavcon_snapshots'
 const VERSION_KEY  = 'pavcon_obras_version'
 
-// Incrementar sempre que o mockData for atualizado com novos dados reais
-const DATA_VERSION = '2026-06-08-344'
-
 function load(): Obra[] {
   try {
-    const storedVersion = localStorage.getItem(VERSION_KEY)
     const raw = localStorage.getItem(STORAGE_KEY)
-
-    // Se a versão mudou (nova carga de dados), descarta o cache e usa mockData
-    if (storedVersion !== DATA_VERSION || !raw) {
-      localStorage.setItem(VERSION_KEY, DATA_VERSION)
+    if (!raw) {
+      // Primeira vez: carrega os dados iniciais
       localStorage.setItem(STORAGE_KEY, JSON.stringify(initialObras))
       return initialObras
     }
-
     const parsed: Obra[] = JSON.parse(raw)
     return parsed.map(o => ({ ...o, engenharia: o.engenharia ?? '' }))
   } catch {
