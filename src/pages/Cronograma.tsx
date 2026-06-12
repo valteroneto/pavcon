@@ -1,9 +1,14 @@
 import { useState, useRef, useMemo } from 'react'
 import * as XLSX from 'xlsx'
+import * as pdfjsLib from 'pdfjs-dist'
 import {
   Upload, FileSpreadsheet, Calendar, TrendingUp, Download,
-  ChevronRight, AlertCircle, CheckCircle2, Clock, Layers
+  ChevronRight, AlertCircle, CheckCircle2, Clock, Layers, FileText
 } from 'lucide-react'
+
+// Configura worker do PDF.js via CDN (evita bundling)
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -121,6 +126,65 @@ function parseOrcamento(wb: XLSX.WorkBook): ServicoOrcamento[] {
   }
 
   return servicos.filter(s => s.descricao.length > 4).slice(0, 200)
+}
+
+// ─── Parser PDF ───────────────────────────────────────────────────────────────
+
+async function parseOrcamentoPDF(buf: ArrayBuffer): Promise<ServicoOrcamento[]> {
+  const pdf = await pdfjsLib.getDocument({ data: buf }).promise
+  let textoCompleto = ''
+
+  for (let p = 1; p <= pdf.numPages; p++) {
+    const page = await pdf.getPage(p)
+    const content = await page.getTextContent()
+    const linhas = content.items
+      .map((it: any) => it.str ?? '')
+      .join(' ')
+    textoCompleto += linhas + '\n'
+  }
+
+  // Divide em linhas e extrai serviços
+  const linhas = textoCompleto.split(/\n|(?<=\d)\s{3,}/)
+  const servicos: ServicoOrcamento[] = []
+  const ignorar = ['descrição', 'item', 'código', 'total geral', 'subtotal', 'bdi', 'valor total', 'referência']
+
+  for (const linha of linhas) {
+    const limpa = linha.trim()
+    if (limpa.length < 6) continue
+    if (ignorar.some(ig => limpa.toLowerCase().startsWith(ig))) continue
+
+    // Extrai todos os números da linha
+    const nums = [...limpa.matchAll(/[\d.,]+/g)]
+      .map(m => parseFloat(m[0].replace(/\./g, '').replace(',', '.')))
+      .filter(n => !isNaN(n) && n > 0 && n < 1e9)
+
+    if (nums.length === 0) continue
+
+    // Extrai a descrição textual (parte sem números)
+    const desc = limpa.replace(/[\d.,]+/g, ' ').replace(/\s+/g, ' ').trim()
+    if (desc.length < 5) continue
+
+    // Palavras técnicas indicam serviço real
+    const temPalavraChave = ETAPA_MAP.some(e =>
+      e.keywords.some(k => desc.toLowerCase().includes(k))
+    )
+    if (!temPalavraChave && nums.length < 2) continue
+
+    const valorTotal = Math.max(...nums)
+    if (valorTotal < 10) continue
+
+    const unidade = limpa.match(/\b(m²|m³|m2|m3|m\b|un|vb|cj|kg|l\b|h\b|t\b|und|gl)\b/i)?.[1] ?? 'vb'
+
+    servicos.push({
+      descricao: desc.slice(0, 100),
+      unidade,
+      quantidade: nums.length >= 2 ? nums[0] : 1,
+      valorUnitario: nums.length >= 3 ? nums[nums.length - 2] : valorTotal,
+      valorTotal,
+    })
+  }
+
+  return servicos.filter(s => s.descricao.length > 5).slice(0, 200)
 }
 
 // ─── Gerador de cronograma ────────────────────────────────────────────────────
@@ -423,11 +487,18 @@ export default function Cronograma() {
 
     try {
       const buf = await file.arrayBuffer()
-      const wb = XLSX.read(buf, { type: 'array' })
-      const servicos = parseOrcamento(wb)
+      const isPDF = file.name.toLowerCase().endsWith('.pdf') || file.type === 'application/pdf'
+
+      let servicos: ServicoOrcamento[]
+      if (isPDF) {
+        servicos = await parseOrcamentoPDF(buf)
+      } else {
+        const wb = XLSX.read(buf, { type: 'array' })
+        servicos = parseOrcamento(wb)
+      }
 
       if (servicos.length < 3) {
-        setErro('Não foi possível identificar serviços no arquivo. Verifique se é um orçamento com colunas de descrição e valores.')
+        setErro('Não foi possível identificar serviços suficientes no arquivo. Verifique se o arquivo contém descrições de serviços com valores.')
         setStep('idle')
         return
       }
@@ -437,7 +508,7 @@ export default function Cronograma() {
       setResumo(resultado.resumo)
       setStep('resultado')
     } catch (e) {
-      setErro('Erro ao processar o arquivo. Certifique-se de que é um arquivo Excel válido (.xlsx).')
+      setErro('Erro ao processar o arquivo. Verifique se é um Excel (.xlsx) ou PDF válido com orçamento de obra.')
       setStep('idle')
     }
   }
@@ -493,17 +564,28 @@ export default function Cronograma() {
             onDragOver={e => e.preventDefault()}
             onClick={() => fileRef.current?.click()}
           >
-            <FileSpreadsheet size={40} className="mx-auto mb-4 text-blue-500" />
+            <div className="flex items-center justify-center gap-4 mb-4">
+              <FileSpreadsheet size={36} className="text-green-500" />
+              <FileText size={36} className="text-red-500" />
+            </div>
             <h3 className="font-bold text-gray-700 text-lg mb-2">Anexe o Orçamento da Obra</h3>
             <p className="text-sm text-gray-500 mb-4">
-              Arraste ou clique para selecionar o arquivo Excel (.xlsx) com o orçamento
+              Arraste ou clique para selecionar o orçamento em Excel ou PDF
             </p>
             <div className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-6 py-2.5 rounded-xl text-sm font-semibold transition-colors">
               <Upload size={16} />
               Selecionar arquivo
             </div>
-            <p className="text-xs text-gray-400 mt-3">Suporta: XLSX com serviços, quantitativos e valores</p>
-            <input ref={fileRef} type="file" accept=".xlsx,.xls" className="hidden"
+            <div className="flex items-center justify-center gap-4 mt-3">
+              <span className="text-xs text-gray-400 flex items-center gap-1">
+                <FileSpreadsheet size={12} className="text-green-500" /> Excel (.xlsx, .xls)
+              </span>
+              <span className="text-gray-300">|</span>
+              <span className="text-xs text-gray-400 flex items-center gap-1">
+                <FileText size={12} className="text-red-500" /> PDF (.pdf)
+              </span>
+            </div>
+            <input ref={fileRef} type="file" accept=".xlsx,.xls,.pdf" className="hidden"
               onChange={e => e.target.files?.[0] && handleFile(e.target.files[0])} />
           </div>
 
