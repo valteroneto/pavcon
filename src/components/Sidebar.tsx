@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Building2, BarChart2, TrendingUp, CheckSquare,
   Users, Upload, ShieldCheck, Eye, Crown, MessageSquare, Bell,
   LogOut, Menu, X, ChevronRight, LifeBuoy, Map, ClipboardList,
-  AlertTriangle,
+  AlertTriangle, CalendarDays,
 } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import { useObras } from '../contexts/ObrasContext'
@@ -35,7 +35,8 @@ const navGroups = [
   {
     label: 'Monitoramento',
     items: [
-      { to: '/alertas', label: 'Alertas', icon: AlertTriangle, adminOnly: false as const },
+      { to: '/alertas',    label: 'Alertas',    icon: AlertTriangle, adminOnly: false as const },
+      { to: '/cronograma', label: 'Cronograma', icon: CalendarDays,  adminOnly: false as const },
     ],
   },
   {

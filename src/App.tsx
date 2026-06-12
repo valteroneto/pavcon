@@ -21,6 +21,7 @@ import Mapa from './pages/Mapa'
 import Login from './pages/Login'
 import RedefinirSenha from './pages/RedefinirSenha'
 import Alertas from './pages/Alertas'
+import Cronograma from './pages/Cronograma'
 
 function AppRoutes() {
   const { user } = useAuth()
@@ -57,6 +58,8 @@ function AppRoutes() {
               <Route path="/importar"    element={<Importar />} />
               {/* Alertas */}
               <Route path="/alertas"     element={<Alertas />} />
+              {/* Planejador */}
+              <Route path="/cronograma"  element={<Cronograma />} />
               {/* Comunicações */}
               <Route path="/aprovacoes"   element={<Aprovacoes />} />
               <Route path="/chat"         element={<Chat />} />
