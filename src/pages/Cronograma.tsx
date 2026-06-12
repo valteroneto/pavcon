@@ -266,6 +266,10 @@ async function parseOrcamentoPDF(buf: ArrayBuffer): Promise<ServicoOrcamento[]> 
 
   const textoCompleto = todasLinhas.join('\n')
 
+  console.log('[PDF] Total linhas extraídas:', todasLinhas.length)
+  console.log('[PDF] Primeiras 30 linhas:', todasLinhas.slice(0, 30))
+  console.log('[PDF] Amostra do texto (chars 0-500):', textoCompleto.slice(0, 500))
+
   // Detecta formato SIENGE/STARIAN
   const isSienge =
     /Insumos\s+Or[çc]ados/i.test(textoCompleto) ||
@@ -273,12 +277,17 @@ async function parseOrcamentoPDF(buf: ArrayBuffer): Promise<ServicoOrcamento[]> 
     /Servi[çc]o\s+\d{2}\.\d{3}/i.test(textoCompleto) ||
     /Total\s+servi[çc]o/i.test(textoCompleto)
 
+  console.log('[PDF] isSienge detectado:', isSienge)
+
   if (isSienge) {
     const result = parseSienge(todasLinhas)
+    console.log('[PDF] parseSienge retornou:', result.length, 'serviços')
     if (result.length > 0) return result
   }
 
-  return parseGenericLinhas(todasLinhas)
+  const generic = parseGenericLinhas(todasLinhas)
+  console.log('[PDF] parseGeneric retornou:', generic.length, 'serviços')
+  return generic
 }
 
 // ─── Gerador de cronograma ────────────────────────────────────────────────────
