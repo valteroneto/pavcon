@@ -130,41 +130,108 @@ function parseOrcamento(wb: XLSX.WorkBook): ServicoOrcamento[] {
 
 // ─── Parser PDF ───────────────────────────────────────────────────────────────
 
-async function parseOrcamentoPDF(buf: ArrayBuffer): Promise<ServicoOrcamento[]> {
-  const pdf = await pdfjsLib.getDocument({ data: buf }).promise
-  let textoCompleto = ''
+function parseBRL(s: string): number {
+  return parseFloat(s.replace(/\./g, '').replace(',', '.'))
+}
 
-  for (let p = 1; p <= pdf.numPages; p++) {
-    const page = await pdf.getPage(p)
-    const content = await page.getTextContent()
-    const linhas = content.items
-      .map((it: any) => it.str ?? '')
-      .join(' ')
-    textoCompleto += linhas + '\n'
+function extrairLinhasPDF(items: any[]): string[] {
+  // Agrupa itens por posição Y (mesma linha visual)
+  const rowMap = new Map<number, { x: number; text: string }[]>()
+  for (const item of items) {
+    const str = (item.str ?? '').trim()
+    if (!str) continue
+    const [, , , , x, y] = item.transform as number[]
+    const yKey = Math.round(y / 2) * 2
+    if (!rowMap.has(yKey)) rowMap.set(yKey, [])
+    rowMap.get(yKey)!.push({ x, text: str })
+  }
+  const sortedYs = [...rowMap.keys()].sort((a, b) => b - a)
+  return sortedYs.map(y =>
+    rowMap.get(y)!.sort((a, b) => a.x - b.x).map(r => r.text).join(' ')
+  ).filter(l => l.trim().length > 0)
+}
+
+function parseSienge(linhas: string[]): ServicoOrcamento[] {
+  const servicos: ServicoOrcamento[] = []
+  let currentServico = ''
+
+  for (const linha of linhas) {
+    // Cabeçalho de etapa — apenas rastreia contexto
+    if (/^Etapa\s+[\d.]+\s*[-–]/i.test(linha)) {
+      currentServico = ''
+      continue
+    }
+
+    // Cabeçalho de subetapa — ignora
+    if (/^Subetapa\s+[\d.]+\s*[-–]/i.test(linha)) {
+      continue
+    }
+
+    // Cabeçalho de serviço: "Serviço 00.001.001.001 - NOME DO SERVIÇO"
+    const mServ = linha.match(/^Servi[çc]o\s+[\d.]+\s*[-–]\s*(.+)$/i)
+    if (mServ) {
+      currentServico = mServ[1].trim()
+      continue
+    }
+
+    // Total do serviço: "Total serviço 1.500,00"
+    const mTotalServ = linha.match(/Total\s+servi[çc]o\s+([\d.]+,\d{2})/i)
+    if (mTotalServ && currentServico) {
+      const valor = parseBRL(mTotalServ[1])
+      if (valor > 0) {
+        servicos.push({
+          descricao: currentServico.slice(0, 100),
+          unidade: 'vb',
+          quantidade: 1,
+          valorUnitario: valor,
+          valorTotal: valor,
+        })
+      }
+      currentServico = ''
+      continue
+    }
+
+    // Linha de insumo: "CÓDIGO DESCRIÇÃO UN QTD PREÇO_UN PREÇO_TOTAL DATA"
+    // ex: "13549 PLACA DE OBRA und 1,0000 1.500,0000 1.500,00 08/07/2025"
+    const mInsumo = linha.match(
+      /^\d{3,}\s+(.+?)\s+(und?|m[²³23]?|kg|vb|gl|cj|l|h|t|pç|pc|rl|cx|sc|sv|hr|d)\s+([\d.,]+)\s+[\d.]+,\d{4}\s+([\d.]+,\d{2})\s+\d{2}\/\d{2}\/\d{4}$/i
+    )
+    if (mInsumo && !currentServico) {
+      const desc = mInsumo[1].trim()
+      const un = mInsumo[2]
+      const qtd = parseBRL(mInsumo[3])
+      const total = parseBRL(mInsumo[4])
+      if (total > 0 && desc.length > 3) {
+        servicos.push({
+          descricao: desc.slice(0, 100),
+          unidade: un,
+          quantidade: qtd,
+          valorUnitario: total / (qtd || 1),
+          valorTotal: total,
+        })
+      }
+    }
   }
 
-  // Divide em linhas e extrai serviços
-  const linhas = textoCompleto.split(/\n|(?<=\d)\s{3,}/)
+  return servicos
+}
+
+function parseGenericLinhas(linhas: string[]): ServicoOrcamento[] {
   const servicos: ServicoOrcamento[] = []
   const ignorar = ['descrição', 'item', 'código', 'total geral', 'subtotal', 'bdi', 'valor total', 'referência']
 
-  for (const linha of linhas) {
-    const limpa = linha.trim()
+  for (const limpa of linhas) {
     if (limpa.length < 6) continue
     if (ignorar.some(ig => limpa.toLowerCase().startsWith(ig))) continue
 
-    // Extrai todos os números da linha
     const nums = [...limpa.matchAll(/[\d.,]+/g)]
-      .map(m => parseFloat(m[0].replace(/\./g, '').replace(',', '.')))
+      .map(m => parseBRL(m[0]))
       .filter(n => !isNaN(n) && n > 0 && n < 1e9)
-
     if (nums.length === 0) continue
 
-    // Extrai a descrição textual (parte sem números)
-    const desc = limpa.replace(/[\d.,]+/g, ' ').replace(/\s+/g, ' ').trim()
+    const desc = limpa.replace(/[\d.,/]+/g, ' ').replace(/\s+/g, ' ').trim()
     if (desc.length < 5) continue
 
-    // Palavras técnicas indicam serviço real
     const temPalavraChave = ETAPA_MAP.some(e =>
       e.keywords.some(k => desc.toLowerCase().includes(k))
     )
@@ -174,7 +241,6 @@ async function parseOrcamentoPDF(buf: ArrayBuffer): Promise<ServicoOrcamento[]> 
     if (valorTotal < 10) continue
 
     const unidade = limpa.match(/\b(m²|m³|m2|m3|m\b|un|vb|cj|kg|l\b|h\b|t\b|und|gl)\b/i)?.[1] ?? 'vb'
-
     servicos.push({
       descricao: desc.slice(0, 100),
       unidade,
@@ -185,6 +251,34 @@ async function parseOrcamentoPDF(buf: ArrayBuffer): Promise<ServicoOrcamento[]> 
   }
 
   return servicos.filter(s => s.descricao.length > 5).slice(0, 200)
+}
+
+async function parseOrcamentoPDF(buf: ArrayBuffer): Promise<ServicoOrcamento[]> {
+  const pdf = await pdfjsLib.getDocument({ data: buf }).promise
+  const todasLinhas: string[] = []
+
+  for (let p = 1; p <= pdf.numPages; p++) {
+    const page = await pdf.getPage(p)
+    const content = await page.getTextContent()
+    const linhasPagina = extrairLinhasPDF(content.items as any[])
+    todasLinhas.push(...linhasPagina)
+  }
+
+  const textoCompleto = todasLinhas.join('\n')
+
+  // Detecta formato SIENGE/STARIAN
+  const isSienge =
+    /Insumos\s+Or[çc]ados/i.test(textoCompleto) ||
+    /Etapa\s+\d{2}\.\d{3}\s*[-–]/i.test(textoCompleto) ||
+    /Servi[çc]o\s+\d{2}\.\d{3}/i.test(textoCompleto) ||
+    /Total\s+servi[çc]o/i.test(textoCompleto)
+
+  if (isSienge) {
+    const result = parseSienge(todasLinhas)
+    if (result.length > 0) return result
+  }
+
+  return parseGenericLinhas(todasLinhas)
 }
 
 // ─── Gerador de cronograma ────────────────────────────────────────────────────
