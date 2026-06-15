@@ -575,6 +575,17 @@ export default function Cronograma() {
     atividades.length ? Math.max(...atividades.map(a => a.fimSemana)) : 0
   , [atividades])
 
+  function updateAtividade(id: string, campo: 'duracaoSemanas' | 'predecessoras', valor: string) {
+    setAtividades(prev => prev.map(a => {
+      if (a.id !== id) return a
+      if (campo === 'duracaoSemanas') {
+        const dur = Math.max(1, parseInt(valor) || 1)
+        return { ...a, duracaoSemanas: dur, fimSemana: a.inicioSemana + dur - 1 }
+      }
+      return { ...a, predecessoras: valor }
+    }))
+  }
+
   async function handleFile(file: File) {
     if (!file) return
     setErro('')
@@ -820,10 +831,24 @@ export default function Cronograma() {
                             <span className="px-1.5 py-0.5 rounded text-[10px] font-medium text-white"
                               style={{ background: corEtapa(a.etapa) }}>{a.etapa}</span>
                           </td>
-                          <td className="px-3 py-1.5">{a.duracaoSemanas}sem</td>
+                          <td className="px-3 py-1.5">
+                            <input
+                              type="number" min={1} value={a.duracaoSemanas}
+                              onChange={e => updateAtividade(a.id, 'duracaoSemanas', e.target.value)}
+                              className="w-14 border border-gray-200 rounded px-1 py-0.5 text-center focus:outline-none focus:border-blue-400 bg-transparent"
+                            />
+                            <span className="ml-0.5 text-gray-400">sem</span>
+                          </td>
                           <td className="px-3 py-1.5 whitespace-nowrap">{inicio.toLocaleDateString('pt-BR')}</td>
                           <td className="px-3 py-1.5 whitespace-nowrap">{fim.toLocaleDateString('pt-BR')}</td>
-                          <td className="px-3 py-1.5">{a.predecessoras}</td>
+                          <td className="px-3 py-1.5">
+                            <input
+                              type="text" value={a.predecessoras}
+                              onChange={e => updateAtividade(a.id, 'predecessoras', e.target.value)}
+                              placeholder="—"
+                              className="w-16 border border-gray-200 rounded px-1 py-0.5 text-center focus:outline-none focus:border-blue-400 bg-transparent"
+                            />
+                          </td>
                           <td className="px-3 py-1.5 max-w-[100px] truncate">{a.recursos}</td>
                           <td className="px-3 py-1.5">{a.peso.toFixed(1)}%</td>
                           <td className="px-3 py-1.5">
