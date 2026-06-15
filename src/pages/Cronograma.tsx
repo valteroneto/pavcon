@@ -6,9 +6,11 @@ import {
   ChevronRight, AlertCircle, CheckCircle2, Clock, Layers, FileText
 } from 'lucide-react'
 
-// Configura worker do PDF.js via CDN (evita bundling)
-pdfjsLib.GlobalWorkerOptions.workerSrc =
-  `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`
+// Worker local via import.meta.url — CDN não tem v6.0.227
+pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+  'pdfjs-dist/build/pdf.worker.min.mjs',
+  import.meta.url
+).toString()
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
