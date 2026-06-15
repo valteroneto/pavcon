@@ -30,13 +30,13 @@ const navGroups = [
       { to: '/engenheiros', label: 'Engenheiros',      icon: Users,        adminOnly: false },
       { to: '/projecoes',   label: 'Faturamento 2026', icon: TrendingUp,   adminOnly: false },
       { to: '/importar',    label: 'Importar',         icon: Upload,       adminOnly: false },
+      { to: '/cronograma', label: 'Cronograma',        icon: CalendarDays, adminOnly: false },
     ],
   },
   {
     label: 'Monitoramento',
     items: [
-      { to: '/alertas',    label: 'Alertas',    icon: AlertTriangle, adminOnly: false as const },
-      { to: '/cronograma', label: 'Cronograma', icon: CalendarDays,  adminOnly: false as const },
+      { to: '/alertas', label: 'Alertas', icon: AlertTriangle, adminOnly: false as const },
     ],
   },
   {
