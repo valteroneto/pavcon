@@ -158,9 +158,14 @@ function extrairLinhasPDF(items: any[]): string[] {
 }
 
 function parseSienge(linhas: string[]): ServicoOrcamento[] {
-  const servicos: ServicoOrcamento[] = []
+  // Estratégia: capturar "Total etapa" por etapa (mais confiável que somar serviços)
+  // Fallback: somar "Total serviço" quando não há "Total etapa"
+  const porEtapa: Record<string, { descricao: string; valorTotal: number; etapaExplicita: string }> = {}
+  const servicosSemEtapa: ServicoOrcamento[] = []
+
   let currentServico = ''
   let currentEtapaExplicita = ''
+  let etapaAcum = 0  // acumula serviços enquanto espera o Total etapa
 
   for (const linha of linhas) {
     // Cabeçalho de etapa: "Etapa 01.001 - SERVIÇOS PRELIMINARES"
@@ -168,60 +173,67 @@ function parseSienge(linhas: string[]): ServicoOrcamento[] {
     if (mEtapa) {
       currentEtapaExplicita = mEtapa[1].trim()
       currentServico = ''
+      etapaAcum = 0
       continue
     }
 
-    // Cabeçalho de subetapa — ignora (herda etapa pai)
+    // Cabeçalho de subetapa — ignora
     if (/^Subetapa\s+[\d.]+\s*[-–]/i.test(linha)) continue
 
-    // Cabeçalho de serviço: "Serviço 00.001.001.001 - NOME DO SERVIÇO"
+    // Cabeçalho de serviço
     const mServ = linha.match(/^Servi[çc]o\s+[\d.]+\s*[-–]\s*(.+)$/i)
     if (mServ) {
       currentServico = mServ[1].trim()
       continue
     }
 
-    // Total do serviço: "Total serviço 1.500,00"
+    // Total do serviço → acumula no total da etapa
     const mTotalServ = linha.match(/Total\s+servi[çc]o\s+([\d.]+,\d{2})/i)
     if (mTotalServ && currentServico) {
       const valor = parseBRL(mTotalServ[1])
-      if (valor > 0) {
-        servicos.push({
+      if (valor > 0 && currentEtapaExplicita) {
+        etapaAcum += valor
+      } else if (valor > 0) {
+        // Serviço sem etapa pai → guarda individualmente
+        servicosSemEtapa.push({
           descricao: currentServico.slice(0, 100),
-          unidade: 'vb',
-          quantidade: 1,
-          valorUnitario: valor,
-          valorTotal: valor,
-          etapaExplicita: currentEtapaExplicita || undefined,
+          unidade: 'vb', quantidade: 1,
+          valorUnitario: valor, valorTotal: valor,
         })
       }
       currentServico = ''
       continue
     }
 
-    // Linha de insumo avulso (sem serviço pai)
-    const mInsumo = linha.match(
-      /^\d{3,}\s+(.+?)\s+(und?|m[²³23]?|kg|vb|gl|cj|l|h|t|pç|pc|rl|cx|sc|sv|hr|d)\s+([\d.,]+)\s+[\d.]+,\d{4}\s+([\d.]+,\d{2})\s+\d{2}\/\d{2}\/\d{4}$/i
-    )
-    if (mInsumo && !currentServico) {
-      const desc = mInsumo[1].trim()
-      const un = mInsumo[2]
-      const qtd = parseBRL(mInsumo[3])
-      const total = parseBRL(mInsumo[4])
-      if (total > 0 && desc.length > 3) {
-        servicos.push({
-          descricao: desc.slice(0, 100),
-          unidade: un,
-          quantidade: qtd,
-          valorUnitario: total / (qtd || 1),
-          valorTotal: total,
-          etapaExplicita: currentEtapaExplicita || undefined,
-        })
+    // Total da etapa — linha mais confiável: usa este valor direto
+    const mTotalEtapa = linha.match(/Total\s+etapa\s+([\d.]+,\d{2})/i)
+    if (mTotalEtapa && currentEtapaExplicita) {
+      const valor = parseBRL(mTotalEtapa[1])
+      if (valor > 0) {
+        // Se já existia acumulado, substitui pelo total oficial da etapa
+        porEtapa[currentEtapaExplicita] = {
+          descricao: currentEtapaExplicita,
+          valorTotal: valor,
+          etapaExplicita: currentEtapaExplicita,
+        }
       }
+      etapaAcum = 0
+      currentServico = ''
+      continue
     }
   }
 
-  return servicos
+  // Monta lista final: uma entrada por etapa com o valor correto do PDF
+  const resultado: ServicoOrcamento[] = Object.values(porEtapa).map(e => ({
+    descricao: e.descricao.slice(0, 100),
+    unidade: 'vb',
+    quantidade: 1,
+    valorUnitario: e.valorTotal,
+    valorTotal: e.valorTotal,
+    etapaExplicita: e.etapaExplicita,
+  }))
+
+  return resultado.length > 0 ? resultado : servicosSemEtapa
 }
 
 // Detecta se uma linha é cabeçalho de seção do orçamento (sem valores, texto longo)
