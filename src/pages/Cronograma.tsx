@@ -604,6 +604,214 @@ function CurvaS({ atividades, totalDias, valorVenda }: { atividades: Atividade[]
   )
 }
 
+// ─── Físico-Financeiro ───────────────────────────────────────────────────────
+
+interface PeriodoFF {
+  periodo: number
+  label: string
+  dataInicioPeriodo: string
+  dataFimPeriodo: string
+  fisicoPeriodo: number
+  fisicoAcum: number
+  financeiroPeriodo: number
+  financeiroAcum: number
+}
+
+function calcularFisicoFinanceiro(
+  atividades: Atividade[],
+  totalDias: number,
+  valorVenda: number,
+  dataInicio: string
+): PeriodoFF[] {
+  // Distribui peso de cada atividade dia a dia
+  const pesosPorDia: number[] = Array(totalDias + 2).fill(0)
+  for (const a of atividades) {
+    if (a.nome.startsWith('▸') || a.marco || a.duracaoDias <= 0) continue
+    const ppd = a.peso / a.duracaoDias
+    for (let d = a.inicioDia; d <= a.fimDia; d++) {
+      if (d < pesosPorDia.length) pesosPorDia[d] += ppd
+    }
+  }
+
+  // Agrupa por mês (30 dias) ou semana se prazo curto
+  const tamPeriodo = totalDias <= 60 ? 7 : 30
+  const labelPeriodo = tamPeriodo === 7 ? 'Sem.' : 'Mês'
+  const nPeriodos = Math.ceil(totalDias / tamPeriodo)
+  const inicio = new Date(dataInicio)
+
+  const periodos: PeriodoFF[] = []
+  let fisicoAcum = 0
+  let financeiroAcum = 0
+
+  for (let p = 0; p < nPeriodos; p++) {
+    const diaIni = p * tamPeriodo + 1
+    const diaFim = Math.min((p + 1) * tamPeriodo, totalDias)
+
+    let fisicoPeriodo = 0
+    for (let d = diaIni; d <= diaFim; d++) fisicoPeriodo += pesosPorDia[d] ?? 0
+    fisicoPeriodo = Math.min(fisicoPeriodo, 100)
+    fisicoAcum = Math.min(fisicoAcum + fisicoPeriodo, 100)
+
+    const financeiroPeriodo = valorVenda > 0 ? fisicoPeriodo / 100 * valorVenda : 0
+    financeiroAcum = valorVenda > 0 ? fisicoAcum / 100 * valorVenda : 0
+
+    const di = new Date(inicio); di.setDate(di.getDate() + diaIni - 1)
+    const df = new Date(inicio); df.setDate(df.getDate() + diaFim - 1)
+
+    periodos.push({
+      periodo: p + 1,
+      label: `${labelPeriodo} ${p + 1}`,
+      dataInicioPeriodo: di.toLocaleDateString('pt-BR'),
+      dataFimPeriodo: df.toLocaleDateString('pt-BR'),
+      fisicoPeriodo,
+      fisicoAcum,
+      financeiroPeriodo,
+      financeiroAcum,
+    })
+  }
+  return periodos
+}
+
+function FisicoFinanceiro({
+  atividades, totalDias, valorVenda, dataInicio,
+}: {
+  atividades: Atividade[]; totalDias: number; valorVenda: number; dataInicio: string
+}) {
+  const periodos = useMemo(
+    () => calcularFisicoFinanceiro(atividades, totalDias, valorVenda, dataInicio),
+    [atividades, totalDias, valorVenda, dataInicio]
+  )
+
+  const maxPeriodo = Math.max(...periodos.map(p => p.fisicoPeriodo), 0.01)
+
+  // Mini gráfico barras + linha acumulada
+  const W = 700, H = 180
+  const padL = 44, padB = 28, padR = valorVenda > 0 ? 80 : 20, padT = 12
+  const n = periodos.length
+  const barW = Math.max(4, Math.floor((W - padL - padR) / n) - 2)
+  const toX = (i: number) => padL + i * (W - padL - padR) / n + (W - padL - padR) / n / 2
+  const toYpct = (v: number) => padT + (1 - v / 100) * (H - padT - padB)
+
+  return (
+    <div className="space-y-6">
+      {/* Gráfico */}
+      <div className="bg-white rounded-2xl border border-gray-200 p-5 shadow-sm">
+        <h3 className="font-bold text-gray-800 mb-4 text-sm">Cronograma Físico-Financeiro — Distribuição por Período</h3>
+        <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ maxHeight: 200 }}>
+          {/* Grid */}
+          {[0, 25, 50, 75, 100].map(v => (
+            <g key={v}>
+              <line x1={padL} y1={toYpct(v)} x2={W - padR} y2={toYpct(v)} stroke="#f3f4f6" strokeWidth={1} />
+              <text x={padL - 4} y={toYpct(v) + 4} textAnchor="end" fontSize={8} fill="#9ca3af">{v}%</text>
+            </g>
+          ))}
+          {/* Barras (período) */}
+          {periodos.map((p, i) => {
+            const h = (p.fisicoPeriodo / 100) * (H - padT - padB)
+            const x = toX(i) - barW / 2
+            const y = toYpct(p.fisicoPeriodo)
+            return (
+              <rect key={i} x={x} y={y} width={barW} height={h}
+                fill="#3b82f6" opacity={0.7} rx={2} />
+            )
+          })}
+          {/* Linha acumulada física */}
+          <polyline
+            points={periodos.map((p, i) => `${toX(i)},${toYpct(p.fisicoAcum)}`).join(' ')}
+            fill="none" stroke="#2563eb" strokeWidth={2} />
+          {periodos.map((p, i) => (
+            <circle key={i} cx={toX(i)} cy={toYpct(p.fisicoAcum)} r={3} fill="#2563eb" />
+          ))}
+          {/* Eixo direito R$ acumulado */}
+          {valorVenda > 0 && [0, 25, 50, 75, 100].map(v => (
+            <text key={v} x={W - padR + 4} y={toYpct(v) + 4} textAnchor="start" fontSize={7} fill="#059669">
+              {fmtBRL(v / 100 * valorVenda)}
+            </text>
+          ))}
+          {/* Legenda */}
+          <rect x={padL} y={H - 10} width={10} height={7} fill="#3b82f6" opacity={0.7} rx={1} />
+          <text x={padL + 13} y={H - 4} fontSize={8} fill="#3b82f6">Físico período</text>
+          <circle cx={padL + 90} cy={H - 6} r={3} fill="#2563eb" />
+          <text x={padL + 95} y={H - 4} fontSize={8} fill="#2563eb">Acumulado físico</text>
+          <text x={W / 2} y={H - 1} textAnchor="middle" fontSize={8} fill="#9ca3af">Período</text>
+        </svg>
+      </div>
+
+      {/* Tabela */}
+      <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead className="bg-gray-50 border-b border-gray-200">
+              <tr>
+                {[
+                  'Período', 'Início', 'Fim',
+                  'Físico (%)', 'Físico Acum. (%)',
+                  ...(valorVenda > 0 ? ['Financeiro (R$)', 'Financeiro Acum. (R$)'] : []),
+                  'Avanço Período', 'Acumulado',
+                ].map(h => (
+                  <th key={h} className="px-3 py-2 text-left font-semibold text-gray-600 whitespace-nowrap">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {periodos.map((p, i) => (
+                <tr key={i} className={i % 2 === 0 ? '' : 'bg-gray-50/50'}>
+                  <td className="px-3 py-2 font-semibold text-gray-700">{p.label}</td>
+                  <td className="px-3 py-2 whitespace-nowrap text-gray-500">{p.dataInicioPeriodo}</td>
+                  <td className="px-3 py-2 whitespace-nowrap text-gray-500">{p.dataFimPeriodo}</td>
+                  <td className="px-3 py-2 font-medium text-blue-700">{p.fisicoPeriodo.toFixed(2)}%</td>
+                  <td className="px-3 py-2 font-bold text-blue-900">{p.fisicoAcum.toFixed(2)}%</td>
+                  {valorVenda > 0 && (
+                    <>
+                      <td className="px-3 py-2 font-medium text-green-700 whitespace-nowrap">
+                        {p.financeiroPeriodo.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })}
+                      </td>
+                      <td className="px-3 py-2 font-bold text-green-900 whitespace-nowrap">
+                        {p.financeiroAcum.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })}
+                      </td>
+                    </>
+                  )}
+                  <td className="px-3 py-2" style={{ minWidth: 100 }}>
+                    <div className="bg-gray-100 rounded-full h-2 w-full">
+                      <div className="bg-blue-400 h-full rounded-full" style={{ width: `${Math.min(100, (p.fisicoPeriodo / maxPeriodo) * 100)}%` }} />
+                    </div>
+                  </td>
+                  <td className="px-3 py-2" style={{ minWidth: 100 }}>
+                    <div className="bg-gray-100 rounded-full h-2 w-full">
+                      <div className="bg-blue-700 h-full rounded-full" style={{ width: `${p.fisicoAcum}%` }} />
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {/* Totais */}
+              <tr className="bg-blue-50 font-bold border-t-2 border-blue-200">
+                <td className="px-3 py-2 text-blue-800" colSpan={3}>Total</td>
+                <td className="px-3 py-2 text-blue-800">
+                  {periodos.reduce((s, p) => s + p.fisicoPeriodo, 0).toFixed(2)}%
+                </td>
+                <td className="px-3 py-2 text-blue-900">
+                  {periodos.length > 0 ? periodos[periodos.length - 1].fisicoAcum.toFixed(2) : '0.00'}%
+                </td>
+                {valorVenda > 0 && (
+                  <>
+                    <td className="px-3 py-2 text-green-800 whitespace-nowrap">
+                      {periodos.reduce((s, p) => s + p.financeiroPeriodo, 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })}
+                    </td>
+                    <td className="px-3 py-2 text-green-900 whitespace-nowrap">
+                      {periodos.length > 0 ? periodos[periodos.length - 1].financeiroAcum.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 }) : 'R$ 0'}
+                    </td>
+                  </>
+                )}
+                <td colSpan={2} />
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Página principal ─────────────────────────────────────────────────────────
 
 export default function Cronograma() {
@@ -615,7 +823,7 @@ export default function Cronograma() {
   const [valorVenda, setValorVenda] = useState(0)
   const [atividades, setAtividades] = useState<Atividade[]>([])
   const [resumo, setResumo] = useState<Resumo | null>(null)
-  const [abaAtiva, setAbaAtiva] = useState<'gantt' | 'tabela' | 'curvaS' | 'riscos'>('gantt')
+  const [abaAtiva, setAbaAtiva] = useState<'gantt' | 'tabela' | 'curvaS' | 'fisicoFinanceiro' | 'riscos'>('gantt')
   const [dragId, setDragId] = useState<string | null>(null)
   const [dragOverId, setDragOverId] = useState<string | null>(null)
   const [editingEtapaId, setEditingEtapaId] = useState<string | null>(null)
@@ -884,6 +1092,7 @@ export default function Cronograma() {
                 { id: 'gantt', label: 'Gantt' },
                 { id: 'tabela', label: 'Tabela' },
                 { id: 'curvaS', label: 'Curva S' },
+                { id: 'fisicoFinanceiro', label: 'Físico-Financeiro' },
                 { id: 'riscos', label: 'Riscos' },
               ] as const).map(tab => (
                 <button key={tab.id} onClick={() => setAbaAtiva(tab.id)}
@@ -1096,6 +1305,16 @@ export default function Cronograma() {
                 </div>
               </div>
             </div>
+          )}
+
+          {/* Aba Físico-Financeiro */}
+          {abaAtiva === 'fisicoFinanceiro' && (
+            <FisicoFinanceiro
+              atividades={atividades}
+              totalDias={totalDias}
+              valorVenda={valorVenda}
+              dataInicio={dataInicio}
+            />
           )}
 
           {/* Aba Riscos */}
