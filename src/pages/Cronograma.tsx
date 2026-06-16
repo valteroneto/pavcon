@@ -1,4 +1,4 @@
-import { useState, useRef, useMemo } from 'react'
+import { useState, useRef, useMemo, useEffect } from 'react'
 import * as XLSX from 'xlsx'
 import * as pdfjsLib from 'pdfjs-dist'
 import {
@@ -851,15 +851,27 @@ function FisicoFinanceiro({
 // ─── Página principal ─────────────────────────────────────────────────────────
 
 export default function Cronograma() {
+  const STORAGE_KEY = 'pavcon_cronograma_v1'
+
+  function loadStorage() {
+    try { return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? 'null') } catch { return null }
+  }
+
   const fileRef = useRef<HTMLInputElement>(null)
-  const [step, setStep] = useState<'idle' | 'analisando' | 'resultado'>('idle')
+  const [step, setStep] = useState<'idle' | 'analisando' | 'resultado'>(() => loadStorage()?.step ?? 'idle')
   const [erro, setErro] = useState('')
-  const [fileName, setFileName] = useState('')
-  const [dataInicio, setDataInicio] = useState(() => new Date().toISOString().slice(0, 10))
-  const [valorVenda, setValorVenda] = useState(0)
-  const [atividades, setAtividades] = useState<Atividade[]>([])
-  const [resumo, setResumo] = useState<Resumo | null>(null)
-  const [abaAtiva, setAbaAtiva] = useState<'gantt' | 'tabela' | 'curvaS' | 'fisicoFinanceiro' | 'riscos'>('gantt')
+  const [fileName, setFileName] = useState(() => loadStorage()?.fileName ?? '')
+  const [dataInicio, setDataInicio] = useState(() => loadStorage()?.dataInicio ?? new Date().toISOString().slice(0, 10))
+  const [valorVenda, setValorVenda] = useState<number>(() => loadStorage()?.valorVenda ?? 0)
+  const [atividades, setAtividades] = useState<Atividade[]>(() => loadStorage()?.atividades ?? [])
+  const [resumo, setResumo] = useState<Resumo | null>(() => loadStorage()?.resumo ?? null)
+  const [abaAtiva, setAbaAtiva] = useState<'gantt' | 'tabela' | 'curvaS' | 'fisicoFinanceiro' | 'riscos'>(() => loadStorage()?.abaAtiva ?? 'gantt')
+
+  // Persiste no localStorage sempre que o estado relevante muda
+  useEffect(() => {
+    if (step === 'analisando') return
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ step, fileName, dataInicio, valorVenda, atividades, resumo, abaAtiva }))
+  }, [step, fileName, dataInicio, valorVenda, atividades, resumo, abaAtiva])
   const [dragId, setDragId] = useState<string | null>(null)
   const [dragOverId, setDragOverId] = useState<string | null>(null)
   const [editingEtapaId, setEditingEtapaId] = useState<string | null>(null)
@@ -1198,7 +1210,7 @@ export default function Cronograma() {
             </div>
             <div className="flex gap-2">
               <button
-                onClick={() => { setStep('idle'); setAtividades([]); setResumo(null) }}
+                onClick={() => { setStep('idle'); setAtividades([]); setResumo(null); localStorage.removeItem(STORAGE_KEY) }}
                 className="text-sm text-gray-500 hover:text-gray-700 px-3 py-1.5 border border-gray-200 rounded-lg"
               >
                 Novo orçamento
