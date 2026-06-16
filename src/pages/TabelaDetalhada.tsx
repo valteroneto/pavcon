@@ -1,5 +1,5 @@
 ﻿import { useState, useMemo, useRef, useEffect, useCallback, createContext, useContext } from 'react'
-import { Download, X, Save, Plus, Trash2, ChevronRight, ChevronDown, Send, Lock, TrendingUp, Paperclip } from 'lucide-react'
+import { Download, X, Save, Plus, Trash2, ChevronRight, ChevronDown, Send, Lock, TrendingUp, Paperclip, DollarSign } from 'lucide-react'
 import { engenheiros } from '../data/mockData'
 import type { Obra, StatusObra, Regiao, Prioridade, StatusIDP } from '../types'
 import { useAuth } from '../contexts/AuthContext'
@@ -9,6 +9,7 @@ import { useAnexos } from '../contexts/AnexosContext'
 import { MultiSelect } from '../components/MultiSelect'
 import { faturamentoContratos } from '../data/faturamentoData'
 import HistoricoAvancoModal from '../components/HistoricoAvancoModal'
+import HistoricoMedicoesModal from '../components/HistoricoMedicoesModal'
 import AnexosModal from '../components/AnexosModal'
 
 // Campos que exigem aprovação em 2 alçadas
@@ -542,8 +543,9 @@ export default function TabelaDetalhada() {
   const { getAnexosObra } = useAnexos()
 
   // Modais de histórico e anexos
-  const [historicoObra, setHistoricoObra] = useState<Obra | null>(null)
-  const [anexosObra, setAnexosObra]       = useState<Obra | null>(null)
+  const [historicoObra, setHistoricoObra]     = useState<Obra | null>(null)
+  const [medicoesObra, setMedicoesObra]       = useState<Obra | null>(null)
+  const [anexosObra, setAnexosObra]           = useState<Obra | null>(null)
 
   // Edição inline
   const [editCell, setEditCell] = useState<{ obraId: string; campo: string } | null>(null)
@@ -1274,6 +1276,10 @@ export default function TabelaDetalhada() {
                           className="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors">
                           <TrendingUp size={13} />
                         </button>
+                        <button onClick={() => setMedicoesObra(o)} title="Histórico de medições"
+                          className="p-1.5 rounded-lg text-gray-400 hover:text-green-600 hover:bg-green-50 transition-colors">
+                          <DollarSign size={13} />
+                        </button>
                         <button onClick={() => setAnexosObra(o)} title="Anexos e fotos"
                           className={`p-1.5 rounded-lg transition-colors relative ${
                             getAnexosObra(o.id).length > 0
@@ -1381,6 +1387,7 @@ export default function TabelaDetalhada() {
 
       {/* ── Modais Histórico de Avanço e Anexos ── */}
       {historicoObra && <HistoricoAvancoModal obra={historicoObra} onClose={() => setHistoricoObra(null)} />}
+      {medicoesObra && <HistoricoMedicoesModal obra={medicoesObra} onClose={() => setMedicoesObra(null)} />}
       {anexosObra    && <AnexosModal obra={anexosObra} onClose={() => setAnexosObra(null)} />}
 
       {/* ── Modal Solicitar Aprovação ── */}

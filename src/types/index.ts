@@ -45,6 +45,7 @@ export interface Obra {
   prioridade: Prioridade
   ano: number
   historicoAvanco?: { data: string; avancoPct: number }[]
+  historicoMedicoes?: { data: string; valorMedido: number; descricao?: string }[]
   contratoItem?: string            // Vínculo ao contrato em faturamentoContratos
 }
 

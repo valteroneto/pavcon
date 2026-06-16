@@ -169,7 +169,7 @@ type ImportStep = 'idle' | 'preview' | 'importing' | 'done'
 // ── Componente principal ──────────────────────────────────────────────────────
 export default function Importar() {
   const { isAdmin }  = useAuth()
-  const { addObra, createSnapshot }  = useObras()
+  const { obras, addObra, updateObra, createSnapshot }  = useObras()
 
   const [dragging,      setDragging]      = useState(false)
   const [step,          setStep]          = useState<ImportStep>('idle')
@@ -177,6 +177,7 @@ export default function Importar() {
   const [avisos,        setAvisos]        = useState<string[]>([])
   const [fileName,      setFileName]      = useState('')
   const [sheetNames,    setSheetNames]    = useState<string[]>([])
+  const [modoSync,      setModoSync]      = useState(false)
 
   const handleFile = useCallback((file: File) => {
     if (!isAdmin) return
@@ -237,10 +238,18 @@ export default function Importar() {
 
   const handleImport = () => {
     setStep('importing')
-    // Pequeno timeout para o spinner aparecer antes de bloquear o event loop
     setTimeout(() => {
       createSnapshot('Antes da importação')
-      obrasPreview.forEach(o => addObra(o))
+      if (modoSync) {
+        // Sincronizar: atualizar existentes pelo ordemServico, adicionar novas
+        obrasPreview.forEach(o => {
+          const existente = obras.find(x => x.ordemServico === o.ordemServico && o.ordemServico)
+          if (existente) updateObra(existente.id, o)
+          else addObra(o)
+        })
+      } else {
+        obrasPreview.forEach(o => addObra(o))
+      }
       setStep('done')
     }, 50)
   }
@@ -388,17 +397,30 @@ export default function Importar() {
             </div>
 
             {/* Botão confirmar */}
-            <div className="flex items-center justify-end gap-3">
-              <button onClick={resetar}
-                className="px-4 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
-                Cancelar
-              </button>
-              <button onClick={handleImport} disabled={step === 'importing'}
-                className="flex items-center gap-2 px-6 py-2.5 text-sm font-semibold text-white bg-blue-700 hover:bg-blue-800 disabled:opacity-60 rounded-xl transition-colors shadow-sm">
-                {step === 'importing'
-                  ? <><Loader2 size={15} className="animate-spin" /> Importando...</>
-                  : <><ChevronRight size={15} /> Importar {obrasPreview.length} obra(s)</>}
-              </button>
+            <div className="flex items-center justify-between">
+              <label className="flex items-center gap-2 cursor-pointer select-none text-sm">
+                <div
+                  onClick={() => setModoSync(v => !v)}
+                  className={`w-10 h-5 rounded-full transition-colors relative ${modoSync ? 'bg-blue-600' : 'bg-gray-200'}`}
+                >
+                  <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${modoSync ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                </div>
+                <span className={modoSync ? 'text-blue-700 font-semibold' : 'text-gray-500'}>
+                  {modoSync ? 'Sincronizar (atualiza existentes)' : 'Adicionar (cria novas obras)'}
+                </span>
+              </label>
+              <div className="flex items-center gap-3">
+                <button onClick={resetar}
+                  className="px-4 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
+                  Cancelar
+                </button>
+                <button onClick={handleImport} disabled={step === 'importing'}
+                  className="flex items-center gap-2 px-6 py-2.5 text-sm font-semibold text-white bg-blue-700 hover:bg-blue-800 disabled:opacity-60 rounded-xl transition-colors shadow-sm">
+                  {step === 'importing'
+                    ? <><Loader2 size={15} className="animate-spin" /> Importando...</>
+                    : <><ChevronRight size={15} /> {modoSync ? 'Sincronizar' : 'Importar'} {obrasPreview.length} obra(s)</>}
+                </button>
+              </div>
             </div>
           </>
         )}

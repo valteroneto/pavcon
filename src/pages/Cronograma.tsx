@@ -1,10 +1,13 @@
-import { useState, useRef, useMemo, useEffect, useCallback } from 'react'
+import { useState, useRef, useMemo, useEffect } from 'react'
 import * as XLSX from 'xlsx'
 import * as pdfjsLib from 'pdfjs-dist'
 import {
   Upload, FileSpreadsheet, Calendar, TrendingUp, Download,
-  ChevronRight, AlertCircle, CheckCircle2, Clock, Layers, FileText, Pencil, Plus
+  ChevronRight, ChevronLeft, AlertCircle, CheckCircle2, Clock, Layers, FileText, Pencil, Plus, Trash2, Lock, Unlock,
+  Cloud, CloudDownload, Save, X, Loader2
 } from 'lucide-react'
+import { useAuth } from '../contexts/AuthContext'
+import { supabase, type CronogramaNuvem } from '../lib/supabase'
 
 // Worker local via import.meta.url — CDN não tem v6.0.227
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
@@ -28,6 +31,7 @@ interface Atividade {
   pesoCumulativo: number
   caminhoCritico: boolean
   marco: boolean
+  agendamento: 'auto' | 'manual'
 }
 
 interface Resumo {
@@ -395,6 +399,7 @@ function gerarCronograma(servicos: ServicoOrcamento[], dataInicio: string): { at
         pesoCumulativo: 0,
         caminhoCritico: false,
         marco: false,
+        agendamento: 'auto' as const,
       })
 
       subSemana = Math.min(subSemana + Math.ceil(durSub / 2), fimEtapa)
@@ -414,6 +419,7 @@ function gerarCronograma(servicos: ServicoOrcamento[], dataInicio: string): { at
       pesoCumulativo: 0,
       caminhoCritico: true,
       marco: false,
+      agendamento: 'auto' as const,
     }, ...subAtividades)
 
     semanaAtual = fimEtapa + 1
@@ -434,6 +440,7 @@ function gerarCronograma(servicos: ServicoOrcamento[], dataInicio: string): { at
     pesoCumulativo: 100,
     caminhoCritico: true,
     marco: true,
+    agendamento: 'auto' as const,
   })
 
   // Calcula peso cumulativo
@@ -470,18 +477,53 @@ function gerarCronograma(servicos: ServicoOrcamento[], dataInicio: string): { at
   }
 }
 
-// ─── Exportar Excel ───────────────────────────────────────────────────────────
+// ─── Exportar Excel (multi-sheet) ─────────────────────────────────────────────
+
+function exportarExcelExecutivo(atividades: Atividade[], dataInicio: string, valorVenda: number) {
+  const inicio = new Date(dataInicio)
+  const rows = atividades
+    .filter(a => !a.marco)
+    .map(a => {
+      const isMae = a.nome.startsWith('▸')
+      const di = new Date(inicio); di.setDate(di.getDate() + (a.inicioDia - 1))
+      const df = new Date(inicio); df.setDate(df.getDate() + (a.fimDia - 1))
+      const row: Record<string, unknown> = {
+        'EAP': a.eap,
+        'Atividade': isMae ? a.nome.replace('▸ ', '').toUpperCase() : a.nome,
+        'Etapa': isMae ? '' : a.etapa,
+        'Duração (dias)': a.duracaoDias,
+        'Início': di.toLocaleDateString('pt-BR'),
+        'Término': df.toLocaleDateString('pt-BR'),
+        'Predecessoras': a.predecessoras,
+      }
+      if (valorVenda > 0 && isMae) {
+        row['Valor Total (R$)'] = +(a.peso / 100 * valorVenda).toFixed(2)
+      } else if (valorVenda > 0) {
+        row['Valor Total (R$)'] = ''
+      }
+      return row
+    })
+  const ws = XLSX.utils.json_to_sheet(rows)
+  ws['!cols'] = [
+    { wch: 8 }, { wch: 38 }, { wch: 26 }, { wch: 14 },
+    { wch: 13 }, { wch: 13 }, { wch: 12 },
+    ...(valorVenda > 0 ? [{ wch: 18 }] : []),
+  ]
+  const wb = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(wb, ws, 'Cronograma Executivo')
+  XLSX.writeFile(wb, 'cronograma-executivo.xlsx')
+}
 
 function exportarExcel(atividades: Atividade[], dataInicio: string, valorVenda: number) {
+  const wb = XLSX.utils.book_new()
   const inicio = new Date(dataInicio)
-  const rows = atividades.map(a => {
-    const di = new Date(inicio)
-    di.setDate(di.getDate() + (a.inicioDia - 1))
-    const df = new Date(inicio)
-    df.setDate(df.getDate() + (a.fimDia - 1))
+
+  // Sheet 1 — Executivo
+  const rowsExec = atividades.map(a => {
+    const di = new Date(inicio); di.setDate(di.getDate() + (a.inicioDia - 1))
+    const df = new Date(inicio); df.setDate(df.getDate() + (a.fimDia - 1))
     const row: Record<string, unknown> = {
-      'ID': a.id,
-      'EAP': a.eap,
+      'ID': a.id, 'EAP': a.eap,
       'Atividade': a.nome.replace('▸ ', ''),
       'Etapa': a.etapa,
       'Duração (dias)': a.duracaoDias,
@@ -489,20 +531,315 @@ function exportarExcel(atividades: Atividade[], dataInicio: string, valorVenda: 
       'Término': df.toLocaleDateString('pt-BR'),
       'Predecessoras': a.predecessoras,
       'Recursos': a.recursos,
-      'Peso (%)': a.peso.toFixed(2),
-      'Peso Acum. (%)': a.pesoCumulativo.toFixed(2),
+      'Peso (%)': +a.peso.toFixed(2),
+      'Peso Acum. (%)': +a.pesoCumulativo.toFixed(2),
       'Caminho Crítico': a.caminhoCritico ? 'Sim' : 'Não',
     }
     if (valorVenda > 0) {
-      row['Valor Venda (R$)'] = (a.peso / 100 * valorVenda).toFixed(2)
-      row['Valor Acum. (R$)'] = (a.pesoCumulativo / 100 * valorVenda).toFixed(2)
+      row['Valor (R$)'] = +(a.peso / 100 * valorVenda).toFixed(2)
+      row['Valor Acum. (R$)'] = +(a.pesoCumulativo / 100 * valorVenda).toFixed(2)
     }
     return row
   })
-  const ws = XLSX.utils.json_to_sheet(rows)
-  const wb = XLSX.utils.book_new()
-  XLSX.utils.book_append_sheet(wb, ws, 'Cronograma')
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rowsExec), 'Executivo')
+
+  // Sheet 2 — Gantt (dias como colunas, X = atividade ativa naquele dia)
+  const totalDias = atividades.length ? Math.max(...atividades.map(a => a.fimDia)) : 0
+  const ganttRows = atividades.map(a => {
+    const row: Record<string, unknown> = { 'Atividade': a.nome.replace('▸ ', ''), 'Etapa': a.etapa }
+    for (let d = 1; d <= Math.min(totalDias, 180); d++) {
+      const date = new Date(inicio); date.setDate(date.getDate() + d - 1)
+      const label = date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
+      row[label] = d >= a.inicioDia && d <= a.fimDia ? 'X' : ''
+    }
+    return row
+  })
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(ganttRows), 'Gantt')
+
+  // Sheet 3 — Curva S
+  const dias = Math.min(totalDias, 120)
+  const curvaRows = Array.from({ length: dias + 1 }, (_, s) => {
+    const acum = atividades
+      .filter(a => !a.nome.startsWith('▸') && !a.marco && a.fimDia <= s)
+      .reduce((sum, a) => sum + a.peso, 0)
+    const date = new Date(inicio); date.setDate(date.getDate() + s)
+    return {
+      'Dia': s,
+      'Data': date.toLocaleDateString('pt-BR'),
+      'Avanço Físico Acum. (%)': +Math.min(100, acum).toFixed(2),
+      ...(valorVenda > 0 ? { 'Avanço Financeiro Acum. (R$)': +(Math.min(100, acum) / 100 * valorVenda).toFixed(2) } : {}),
+    }
+  })
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(curvaRows), 'Curva S')
+
+  // Sheet 4 — Físico-Financeiro por período
+  const tamPeriodo = totalDias <= 60 ? 7 : 30
+  const labelPeriodo = tamPeriodo === 7 ? 'Sem.' : 'Mês'
+  const nPeriodos = Math.ceil(totalDias / tamPeriodo)
+  const pesosPorDia: number[] = Array(totalDias + 2).fill(0)
+  for (const a of atividades) {
+    if (a.nome.startsWith('▸') || a.marco || a.duracaoDias <= 0) continue
+    const ppd = a.peso / a.duracaoDias
+    for (let d = a.inicioDia; d <= a.fimDia; d++) { if (d < pesosPorDia.length) pesosPorDia[d] += ppd }
+  }
+  let fisicoAcum = 0, financeiroAcum = 0
+  const ffRows = Array.from({ length: nPeriodos }, (_, p) => {
+    const diaIni = p * tamPeriodo + 1
+    const diaFim = Math.min((p + 1) * tamPeriodo, totalDias)
+    let fisicoPeriodo = 0
+    for (let d = diaIni; d <= diaFim; d++) fisicoPeriodo += pesosPorDia[d] ?? 0
+    fisicoPeriodo = Math.min(fisicoPeriodo, 100)
+    fisicoAcum = Math.min(fisicoAcum + fisicoPeriodo, 100)
+    const financeiroPeriodo = valorVenda > 0 ? fisicoPeriodo / 100 * valorVenda : 0
+    financeiroAcum = valorVenda > 0 ? fisicoAcum / 100 * valorVenda : 0
+    const di = new Date(inicio); di.setDate(di.getDate() + diaIni - 1)
+    const df = new Date(inicio); df.setDate(df.getDate() + diaFim - 1)
+    return {
+      'Período': `${labelPeriodo} ${p + 1}`,
+      'Início': di.toLocaleDateString('pt-BR'),
+      'Fim': df.toLocaleDateString('pt-BR'),
+      'Físico Período (%)': +fisicoPeriodo.toFixed(2),
+      'Físico Acum. (%)': +fisicoAcum.toFixed(2),
+      ...(valorVenda > 0 ? {
+        'Financeiro Período (R$)': +financeiroPeriodo.toFixed(2),
+        'Financeiro Acum. (R$)': +financeiroAcum.toFixed(2),
+      } : {}),
+    }
+  })
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(ffRows), 'Físico-Financeiro')
+
   XLSX.writeFile(wb, 'cronograma-obra.xlsx')
+}
+
+// ─── Exportar PDF ──────────────────────────────────────────────────────────────
+
+async function exportarPDF(containerSelector: string) {
+  const { default: html2canvas } = await import('html2canvas')
+  const { default: jsPDF } = await import('jspdf')
+
+  const el = document.querySelector<HTMLElement>(containerSelector)
+  if (!el) return
+
+  const canvas = await html2canvas(el, {
+    scale: 2,
+    useCORS: true,
+    backgroundColor: '#ffffff',
+    logging: false,
+  })
+
+  const imgData = canvas.toDataURL('image/jpeg', 0.92)
+  const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' })
+  const pageW = pdf.internal.pageSize.getWidth()
+  const pageH = pdf.internal.pageSize.getHeight()
+  const imgH = (canvas.height * pageW) / canvas.width
+
+  let y = 0
+  while (y < imgH) {
+    if (y > 0) pdf.addPage()
+    pdf.addImage(imgData, 'JPEG', 0, -y, pageW, imgH)
+    y += pageH
+  }
+
+  pdf.save('cronograma-obra.pdf')
+}
+
+// ─── Relatório Executivo PDF (jsPDF programático) ────────────────────────────
+
+async function gerarRelatorioPDFExecutivo(
+  atividades: Atividade[],
+  dataInicio: string,
+  valorVenda: number,
+  resumo: { prazoTotal: number; totalAtividades: number; etapas: string[] }
+) {
+  const { default: jsPDF } = await import('jspdf')
+  const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
+  const W = 210, margin = 14
+  const AZUL = [30, 58, 138] as const
+  const LARANJA = [245, 146, 29] as const
+  const CINZA = [100, 116, 139] as const
+
+  function hex2rgb(hex: string): [number, number, number] {
+    const r = parseInt(hex.slice(1, 3), 16)
+    const g = parseInt(hex.slice(3, 5), 16)
+    const b = parseInt(hex.slice(5, 7), 16)
+    return [r, g, b]
+  }
+
+  let pageNum = 1
+  function addHeader() {
+    // Barra azul topo
+    pdf.setFillColor(...AZUL)
+    pdf.rect(0, 0, W, 22, 'F')
+    // Texto PAVCON
+    pdf.setTextColor(255, 255, 255)
+    pdf.setFontSize(18)
+    pdf.setFont('helvetica', 'bold')
+    pdf.text('PAVCON', margin, 14)
+    // Subtítulo direita
+    pdf.setFontSize(8)
+    pdf.setFont('helvetica', 'normal')
+    pdf.text('CONSTRUTORA', W - margin, 9, { align: 'right' })
+    pdf.text('GESTÃO DE OBRAS', W - margin, 14, { align: 'right' })
+    // Linha laranja
+    pdf.setFillColor(...LARANJA)
+    pdf.rect(0, 22, W, 1.5, 'F')
+  }
+
+  function addFooter(page: number) {
+    pdf.setFillColor(245, 247, 250)
+    pdf.rect(0, 285, W, 12, 'F')
+    pdf.setTextColor(...CINZA)
+    pdf.setFontSize(7)
+    pdf.setFont('helvetica', 'normal')
+    pdf.text(`Relatório gerado em ${new Date().toLocaleDateString('pt-BR')}  —  Pavcon Construtora`, margin, 292)
+    pdf.text(`Página ${page}`, W - margin, 292, { align: 'right' })
+  }
+
+  // ── Página 1: Capa + Resumo + Tabela ──────────────────────────────────────
+  addHeader()
+
+  // Título do relatório
+  pdf.setTextColor(...AZUL)
+  pdf.setFontSize(14)
+  pdf.setFont('helvetica', 'bold')
+  pdf.text('CRONOGRAMA EXECUTIVO DE OBRA', margin, 35)
+  pdf.setFontSize(9)
+  pdf.setFont('helvetica', 'normal')
+  pdf.setTextColor(...CINZA)
+  const dtInicio = new Date(dataInicio + 'T00:00:00')
+  pdf.text(`Data de início: ${dtInicio.toLocaleDateString('pt-BR')}   |   Emitido em: ${new Date().toLocaleDateString('pt-BR')}`, margin, 41)
+
+  // Cards resumo
+  const cards = [
+    { label: 'Prazo Total', value: `${resumo.prazoTotal} dias` },
+    { label: 'Atividades', value: `${resumo.totalAtividades}` },
+    { label: 'Etapas', value: `${resumo.etapas.length}` },
+    { label: 'Valor de Venda', value: valorVenda > 0 ? `R$ ${(valorVenda / 1e6).toFixed(2)}M` : '—' },
+  ]
+  const cardW = (W - margin * 2 - 9) / 4
+  cards.forEach((c, i) => {
+    const x = margin + i * (cardW + 3)
+    pdf.setFillColor(248, 250, 252)
+    pdf.roundedRect(x, 46, cardW, 18, 2, 2, 'F')
+    pdf.setDrawColor(...AZUL)
+    pdf.setLineWidth(0.3)
+    pdf.roundedRect(x, 46, cardW, 18, 2, 2, 'S')
+    pdf.setFontSize(7)
+    pdf.setTextColor(...CINZA)
+    pdf.setFont('helvetica', 'normal')
+    pdf.text(c.label.toUpperCase(), x + cardW / 2, 52, { align: 'center' })
+    pdf.setFontSize(11)
+    pdf.setTextColor(...AZUL)
+    pdf.setFont('helvetica', 'bold')
+    pdf.text(c.value, x + cardW / 2, 60, { align: 'center' })
+  })
+
+  // Tabela de atividades
+  const inicio = new Date(dataInicio + 'T00:00:00')
+  const atvsExport = atividades.filter(a => !a.marco)
+  const colsTab = [
+    { label: 'EAP',       w: 18 },
+    { label: 'Atividade', w: 70 },
+    { label: 'Dur.(d)',   w: 16 },
+    { label: 'Início',    w: 24 },
+    { label: 'Término',   w: 24 },
+    { label: 'Pred.',     w: 18 },
+    ...(valorVenda > 0 ? [{ label: 'Valor (R$)', w: 26 }] : []),
+  ]
+
+  let y = 72
+  const rowH = 6.5
+  const tableW = colsTab.reduce((s, c) => s + c.w, 0)
+
+  // Cabeçalho tabela
+  pdf.setFillColor(...AZUL)
+  pdf.rect(margin, y, tableW, 7, 'F')
+  pdf.setTextColor(255, 255, 255)
+  pdf.setFontSize(7)
+  pdf.setFont('helvetica', 'bold')
+  let cx = margin
+  colsTab.forEach(col => {
+    pdf.text(col.label, cx + col.w / 2, y + 5, { align: 'center' })
+    cx += col.w
+  })
+  y += 7
+
+  pdf.setFont('helvetica', 'normal')
+  atvsExport.forEach((a, idx) => {
+    if (y > 274) {
+      addFooter(pageNum++)
+      pdf.addPage()
+      addHeader()
+      y = 30
+      // Cabeçalho repetido
+      pdf.setFillColor(...AZUL)
+      pdf.rect(margin, y, tableW, 7, 'F')
+      pdf.setTextColor(255, 255, 255)
+      pdf.setFontSize(7)
+      pdf.setFont('helvetica', 'bold')
+      cx = margin
+      colsTab.forEach(col => { pdf.text(col.label, cx + col.w / 2, y + 5, { align: 'center' }); cx += col.w })
+      y += 7
+      pdf.setFont('helvetica', 'normal')
+    }
+
+    const isMae = a.nome.startsWith('▸')
+    const di = new Date(inicio); di.setDate(di.getDate() + a.inicioDia - 1)
+    const df = new Date(inicio); df.setDate(df.getDate() + a.fimDia - 1)
+    const etapaCor = ETAPA_MAP.find(e => e.etapa === a.etapa)?.cor ?? '#6366f1'
+
+    // Fundo alternado / mãe
+    if (isMae) {
+      pdf.setFillColor(230, 236, 255)
+    } else if (idx % 2 === 0) {
+      pdf.setFillColor(248, 250, 252)
+    } else {
+      pdf.setFillColor(255, 255, 255)
+    }
+    pdf.rect(margin, y, tableW, rowH, 'F')
+
+    // Linha colorida lateral para atividades mãe
+    if (isMae) {
+      const [r, g, b] = hex2rgb(etapaCor)
+      pdf.setFillColor(r, g, b)
+      pdf.rect(margin, y, 1.5, rowH, 'F')
+    }
+
+    pdf.setFontSize(6.5)
+    if (isMae) pdf.setTextColor(...AZUL)
+    else pdf.setTextColor(50, 50, 50)
+    if (isMae) pdf.setFont('helvetica', 'bold')
+    else pdf.setFont('helvetica', 'normal')
+
+    cx = margin
+    const cells = [
+      a.eap,
+      isMae ? a.nome.replace('▸ ', '').toUpperCase() : `  ${a.nome}`,
+      String(a.duracaoDias),
+      di.toLocaleDateString('pt-BR'),
+      df.toLocaleDateString('pt-BR'),
+      a.predecessoras || '—',
+      ...(valorVenda > 0 ? [isMae ? `R$ ${(a.peso / 100 * valorVenda / 1000).toFixed(0)}k` : ''] : []),
+    ]
+    colsTab.forEach((col, ci) => {
+      const txt = cells[ci] ?? ''
+      const maxW = col.w - 2
+      const truncated = pdf.getStringUnitWidth(txt) * 6.5 / pdf.internal.scaleFactor > maxW
+        ? txt.slice(0, Math.floor(maxW / (pdf.getStringUnitWidth('x') * 6.5 / pdf.internal.scaleFactor))) + '…'
+        : txt
+      pdf.text(truncated, ci === 1 ? cx + 2 : cx + col.w / 2, y + rowH - 1.8, ci === 1 ? {} : { align: 'center' })
+      cx += col.w
+    })
+
+    // Separador linha
+    pdf.setDrawColor(220, 220, 220)
+    pdf.setLineWidth(0.1)
+    pdf.line(margin, y + rowH, margin + tableW, y + rowH)
+    y += rowH
+  })
+
+  addFooter(pageNum)
+  pdf.save('relatorio-executivo-pavcon.pdf')
 }
 
 // ─── Componente Gantt ─────────────────────────────────────────────────────────
@@ -863,6 +1200,7 @@ function FisicoFinanceiro({
 // ─── Página principal ─────────────────────────────────────────────────────────
 
 export default function Cronograma() {
+  const { user } = useAuth()
   const STORAGE_KEY = 'pavcon_cronograma_v1'
 
   function loadStorage() {
@@ -875,22 +1213,93 @@ export default function Cronograma() {
   const [fileName, setFileName] = useState(() => loadStorage()?.fileName ?? '')
   const [dataInicio, setDataInicio] = useState(() => loadStorage()?.dataInicio ?? new Date().toISOString().slice(0, 10))
   const [valorVenda, setValorVenda] = useState<number>(() => loadStorage()?.valorVenda ?? 0)
-  const [atividades, setAtividades] = useState<Atividade[]>(() => loadStorage()?.atividades ?? [])
+  const [atividades, setAtividades] = useState<Atividade[]>(() =>
+    (loadStorage()?.atividades ?? []).map((a: Atividade) => ({ ...a, agendamento: a.agendamento ?? 'auto' as const }))
+  )
   const [resumo, setResumo] = useState<Resumo | null>(() => loadStorage()?.resumo ?? null)
   const [abaAtiva, setAbaAtiva] = useState<'gantt' | 'tabela' | 'curvaS' | 'fisicoFinanceiro' | 'riscos'>(() => loadStorage()?.abaAtiva ?? 'gantt')
+  const [fontePDF, setFontePDF] = useState<boolean>(() => {
+    const s = loadStorage()
+    return s?.fontePDF ?? s?.fileName?.toLowerCase().endsWith('.pdf') ?? false
+  })
 
   // Persiste no localStorage sempre que o estado relevante muda
   useEffect(() => {
     if (step === 'analisando') return
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ step, fileName, dataInicio, valorVenda, atividades, resumo, abaAtiva }))
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ step, fileName, dataInicio, valorVenda, atividades, resumo, abaAtiva, fontePDF }))
   }, [step, fileName, dataInicio, valorVenda, atividades, resumo, abaAtiva])
+
+  useEffect(() => {
+    if (step === 'idle' && supabase) carregarListaNuvem()
+  }, [step])
   const [dragId, setDragId] = useState<string | null>(null)
   const [dragOverId, setDragOverId] = useState<string | null>(null)
   const [editingEtapaId, setEditingEtapaId] = useState<string | null>(null)
   const [editingEtapaNome, setEditingEtapaNome] = useState('')
   const [editingNomeId, setEditingNomeId] = useState<string | null>(null)
   const [editingNomeValor, setEditingNomeValor] = useState('')
-  const [colAtividadeW, setColAtividadeW] = useState(200)
+  const [selecionados, setSelecionados] = useState<Set<string>>(new Set())
+  const [exportandoPDF, setExportandoPDF] = useState(false)
+  const [showExportMenu, setShowExportMenu] = useState(false)
+  const [printAll, setPrintAll] = useState(false)
+  const [sortData, setSortData] = useState<'asc' | 'desc' | null>(null)
+
+  // ── Nuvem ──────────────────────────────────────────────────────────────────
+  const [modalNuvem, setModalNuvem] = useState<'salvar' | 'carregar' | null>(null)
+  const [nomeNuvem, setNomeNuvem] = useState('')
+  const [listaNuvem, setListaNuvem] = useState<CronogramaNuvem[]>([])
+  const [nuvemLoading, setNuvemLoading] = useState(false)
+  const [nuvemErro, setNuvemErro] = useState('')
+  const [nuvemSucesso, setNuvemSucesso] = useState('')
+
+  async function salvarNaNuvem() {
+    if (!supabase) return setNuvemErro('Supabase não configurado. Adicione as variáveis de ambiente.')
+    if (!nomeNuvem.trim()) return setNuvemErro('Digite um nome para o cronograma.')
+    if (!resumo) return setNuvemErro('Não há cronograma para salvar.')
+    setNuvemLoading(true); setNuvemErro(''); setNuvemSucesso('')
+    const dados = JSON.stringify({ step, fileName, dataInicio, valorVenda, atividades, resumo, abaAtiva, fontePDF })
+    const { error } = await supabase.from('cronogramas').insert({
+      nome: nomeNuvem.trim(),
+      usuario_id: user?.id ?? 'anonimo',
+      dados,
+    })
+    setNuvemLoading(false)
+    if (error) setNuvemErro(error.message)
+    else { setNuvemSucesso('Cronograma salvo!'); setNomeNuvem('') }
+  }
+
+  async function carregarListaNuvem() {
+    if (!supabase) return setNuvemErro('Supabase não configurado.')
+    setNuvemLoading(true); setNuvemErro('')
+    const { data, error } = await supabase
+      .from('cronogramas')
+      .select('id, nome, criado_em, atualizado_em, usuario_id, dados')
+      .eq('usuario_id', user?.id ?? 'anonimo')
+      .order('atualizado_em', { ascending: false })
+    setNuvemLoading(false)
+    if (error) setNuvemErro(error.message)
+    else setListaNuvem((data ?? []) as CronogramaNuvem[])
+  }
+
+  function carregarCronogramaNuvem(item: CronogramaNuvem) {
+    try {
+      const s = JSON.parse(item.dados)
+      if (s.atividades) setAtividades(s.atividades.map((a: Atividade) => ({ ...a, agendamento: a.agendamento ?? 'auto' as const })))
+      if (s.resumo) setResumo(s.resumo)
+      if (s.dataInicio) setDataInicio(s.dataInicio)
+      if (s.valorVenda) setValorVenda(s.valorVenda)
+      if (s.fontePDF !== undefined) setFontePDF(s.fontePDF)
+      setStep('resultado')
+      setModalNuvem(null)
+    } catch { setNuvemErro('Erro ao carregar cronograma.') }
+  }
+
+  async function apagarNuvem(id: string) {
+    if (!supabase) return
+    await supabase.from('cronogramas').delete().eq('id', id)
+    setListaNuvem(prev => prev.filter(c => c.id !== id))
+  }
+  const [colAtividadeW, setColAtividadeW] = useState(260)
   const resizingRef = useRef(false)
   const resizeStartX = useRef(0)
   const resizeStartW = useRef(0)
@@ -901,9 +1310,9 @@ export default function Cronograma() {
     setEditingNomeId(null)
   }
 
-  const nextId = useCallback((prev: Atividade[]) =>
-    String(Math.max(0, ...prev.map(a => parseInt(a.id) || 0)) + 1)
-  , [])
+  function nextId(prev: Atividade[]) {
+    return String(Math.max(0, ...prev.map(a => parseInt(a.id) || 0)) + 1)
+  }
 
   function adicionarAtividade() {
     setAtividades(prev => {
@@ -915,10 +1324,56 @@ export default function Cronograma() {
         etapa: 'Outros Serviços',
         duracaoDias: 5, inicioDia: ultimaFim + 1, fimDia: ultimaFim + 5,
         predecessoras: '', recursos: '', peso: 0, pesoCumulativo: 0,
-        caminhoCritico: false, marco: false,
+        caminhoCritico: false, marco: false, agendamento: 'auto' as const,
       }
       return recalcularEAP([...prev, novaAtividade])
     })
+  }
+
+  function apagarAtividade(id: string) {
+    setAtividades(prev => {
+      const alvo = prev.find(a => a.id === id)
+      if (!alvo) return prev
+      if (alvo.nome.startsWith('▸')) {
+        return recalcularEAP(prev.filter(a => !(a.id === id || a.etapa === alvo.etapa)))
+      }
+      return recalcularEAP(prev.filter(a => a.id !== id))
+    })
+    setSelecionados(prev => { const s = new Set(prev); s.delete(id); return s })
+  }
+
+  function apagarSelecionados() {
+    setAtividades(prev => {
+      let arr = [...prev]
+      // Expande seleção: se uma ▸ estiver selecionada, inclui seus filhos
+      const idsParaApagar = new Set<string>()
+      for (const id of selecionados) {
+        const alvo = arr.find(a => a.id === id)
+        if (!alvo) continue
+        idsParaApagar.add(id)
+        if (alvo.nome.startsWith('▸')) {
+          arr.filter(a => a.etapa === alvo.etapa && !a.nome.startsWith('▸')).forEach(a => idsParaApagar.add(a.id))
+        }
+      }
+      return recalcularEAP(arr.filter(a => !idsParaApagar.has(a.id)))
+    })
+    setSelecionados(new Set())
+  }
+
+  function toggleSelecionado(id: string) {
+    setSelecionados(prev => {
+      const s = new Set(prev)
+      s.has(id) ? s.delete(id) : s.add(id)
+      return s
+    })
+  }
+
+  function toggleSelecionarTodos() {
+    if (selecionados.size === atividades.length) {
+      setSelecionados(new Set())
+    } else {
+      setSelecionados(new Set(atividades.map(a => a.id)))
+    }
   }
 
   function adicionarServico(atividadeId: string) {
@@ -936,7 +1391,7 @@ export default function Cronograma() {
         etapa: mae.etapa,
         duracaoDias: 5, inicioDia: inicioServico, fimDia: inicioServico + 4,
         predecessoras: '', recursos: '', peso: 0, pesoCumulativo: 0,
-        caminhoCritico: false, marco: false,
+        caminhoCritico: false, marco: false, agendamento: 'auto' as const,
       }
       // Insere logo após a última linha da atividade
       const maeIdx = prev.findIndex(a => a.id === atividadeId)
@@ -1010,6 +1465,32 @@ export default function Cronograma() {
     atividades.length ? Math.max(...atividades.map(a => a.fimDia)) : 0
   , [atividades])
 
+  // Atividades ordenadas por data de início (agrupa ▸ com seus filhos)
+  const atividadesOrdenadas = useMemo(() => {
+    if (!sortData) return atividades
+    // Separa marcos
+    const marcos = atividades.filter(a => a.marco)
+    const resto = atividades.filter(a => !a.marco)
+    // Agrupa: cada grupo = [▸, ...filhos]
+    const grupos: Atividade[][] = []
+    let grupoAtual: Atividade[] = []
+    for (const a of resto) {
+      if (a.nome.startsWith('▸')) {
+        if (grupoAtual.length) grupos.push(grupoAtual)
+        grupoAtual = [a]
+      } else {
+        grupoAtual.push(a)
+      }
+    }
+    if (grupoAtual.length) grupos.push(grupoAtual)
+    // Ordena grupos pela data de início do ▸
+    grupos.sort((a, b) => {
+      const ini = (g: Atividade[]) => g[0]?.inicioDia ?? 0
+      return sortData === 'asc' ? ini(a) - ini(b) : ini(b) - ini(a)
+    })
+    return [...grupos.flat(), ...marcos]
+  }, [atividades, sortData])
+
   // Calcula o inicioDia de uma atividade com base em suas predecessoras
   // TI (padrão): "3"   → inicia após o fim da atividade 3
   // II          : "3II" → inicia junto com o início da atividade 3
@@ -1036,6 +1517,7 @@ export default function Cronograma() {
     for (let pass = 0; pass < 8; pass++) {
       let changed = false
       result = result.map(a => {
+        if (a.agendamento === 'manual') return a   // data fixa — não recalcula
         if (!a.predecessoras.trim()) return a
         const novoInicio = calcularInicioPorPredecessoras(a.predecessoras, result)
         if (novoInicio === a.inicioDia) return a
@@ -1097,6 +1579,7 @@ export default function Cronograma() {
       const resultado = gerarCronograma(servicos, dataInicio)
       setAtividades(resultado.atividades)
       setResumo(resultado.resumo)
+      setFontePDF(isPDF)
       setStep('resultado')
     } catch (e) {
       setErro('Erro ao processar o arquivo. Verifique se é um Excel (.xlsx) ou PDF válido com orçamento de obra.')
@@ -1125,14 +1608,25 @@ export default function Cronograma() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-          <Calendar size={22} className="text-blue-600" />
-          Planejador de Obra
-        </h1>
-        <p className="text-gray-500 text-sm mt-1">
-          Gere um cronograma executivo profissional a partir do orçamento da obra
-        </p>
+      <div className="flex items-center gap-3">
+        {step === 'resultado' && (
+          <button
+            onClick={() => { setStep('idle'); setAtividades([]); setResumo(null); localStorage.removeItem(STORAGE_KEY) }}
+            className="flex items-center gap-1 text-sm text-gray-500 hover:text-blue-600 border border-gray-200 hover:border-blue-300 rounded-lg px-3 py-1.5 transition-colors"
+            title="Voltar à tela inicial"
+          >
+            <ChevronLeft size={16} /> Voltar
+          </button>
+        )}
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+            <Calendar size={22} className="text-blue-600" />
+            Planejador de Obra
+          </h1>
+          <p className="text-gray-500 text-sm mt-1">
+            Gere um cronograma executivo profissional a partir do orçamento da obra
+          </p>
+        </div>
       </div>
 
       {step === 'idle' && (
@@ -1221,6 +1715,58 @@ export default function Cronograma() {
               ))}
             </div>
           </div>
+
+          {/* Cronogramas Salvos */}
+          {supabase && (
+            <div className="bg-white rounded-2xl border border-gray-200 p-5">
+              <div className="flex items-center justify-between mb-3">
+                <h4 className="font-bold text-gray-700 text-sm flex items-center gap-2">
+                  <Cloud size={14} className="text-blue-500" />
+                  Cronogramas Salvos
+                </h4>
+                <button
+                  onClick={() => carregarListaNuvem()}
+                  className="text-xs text-gray-400 hover:text-blue-500 transition-colors"
+                  title="Atualizar lista"
+                >
+                  {nuvemLoading ? <Loader2 size={13} className="animate-spin" /> : '↻ Atualizar'}
+                </button>
+              </div>
+              {nuvemLoading && (
+                <div className="flex justify-center py-6"><Loader2 size={20} className="animate-spin text-blue-400" /></div>
+              )}
+              {!nuvemLoading && listaNuvem.length === 0 && (
+                <p className="text-center text-gray-400 text-sm py-6">Nenhum cronograma salvo ainda.</p>
+              )}
+              {!nuvemLoading && listaNuvem.length > 0 && (
+                <div className="space-y-2 max-h-64 overflow-y-auto">
+                  {listaNuvem.map(item => (
+                    <div key={item.id} className="flex items-center gap-3 p-3 border border-gray-100 rounded-xl hover:bg-blue-50 transition-colors">
+                      <div className="flex-1 min-w-0">
+                        <p className="font-semibold text-sm text-gray-800 truncate">{item.nome}</p>
+                        <p className="text-xs text-gray-400">
+                          {new Date(item.atualizado_em ?? item.criado_em).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => carregarCronogramaNuvem(item)}
+                        className="text-xs bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg font-semibold transition-colors flex-shrink-0"
+                      >
+                        Abrir
+                      </button>
+                      <button
+                        onClick={() => apagarNuvem(item.id)}
+                        className="text-gray-300 hover:text-red-500 transition-colors flex-shrink-0"
+                        title="Apagar"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -1233,7 +1779,7 @@ export default function Cronograma() {
       )}
 
       {step === 'resultado' && resumo && (
-        <div className="space-y-4">
+        <div id="cronograma-resultado" className="space-y-4">
           {/* Resumo executivo */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             {[
@@ -1273,11 +1819,19 @@ export default function Cronograma() {
             </div>
             <div className="flex gap-2">
               <button
-                onClick={adicionarAtividade}
+                onClick={(e) => { e.stopPropagation(); adicionarAtividade() }}
                 className="flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-800 px-3 py-1.5 border border-blue-200 hover:border-blue-400 rounded-lg transition-colors"
               >
                 <Plus size={14} /> Atividade
               </button>
+              {selecionados.size > 0 && (
+                <button
+                  onClick={apagarSelecionados}
+                  className="flex items-center gap-1.5 text-sm text-red-600 hover:text-red-800 px-3 py-1.5 border border-red-200 hover:border-red-400 rounded-lg transition-colors"
+                >
+                  <Trash2 size={14} /> Apagar ({selecionados.size})
+                </button>
+              )}
               <button
                 onClick={() => { setStep('idle'); setAtividades([]); setResumo(null); localStorage.removeItem(STORAGE_KEY) }}
                 className="text-sm text-gray-500 hover:text-gray-700 px-3 py-1.5 border border-gray-200 rounded-lg"
@@ -1285,16 +1839,86 @@ export default function Cronograma() {
                 Novo orçamento
               </button>
               <button
-                onClick={() => exportarExcel(atividades, dataInicio, valorVenda)}
-                className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold px-4 py-1.5 rounded-xl transition-colors"
+                onClick={() => { setModalNuvem('salvar'); setNuvemErro(''); setNuvemSucesso('') }}
+                title="Salvar na nuvem"
+                className="flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-800 px-3 py-1.5 border border-blue-200 hover:border-blue-400 rounded-lg transition-colors"
               >
-                <Download size={14} /> Excel
+                <Cloud size={14} /> Nuvem
               </button>
+              <div className="relative">
+                <button
+                  onClick={() => setShowExportMenu(v => !v)}
+                  className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold px-4 py-1.5 rounded-xl transition-colors"
+                >
+                  <Download size={14} /> Exportar ▾
+                </button>
+                {showExportMenu && (
+                  <div
+                    className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-xl shadow-lg z-50 min-w-[200px] overflow-hidden"
+                    onMouseLeave={() => setShowExportMenu(false)}
+                  >
+                    <p className="px-4 pt-2.5 pb-1 text-[10px] font-bold text-gray-400 uppercase tracking-widest">Para a Obra</p>
+                    <button
+                      onClick={() => { setShowExportMenu(false); exportarExcelExecutivo(atividades, dataInicio, valorVenda) }}
+                      className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-green-50 hover:text-green-700"
+                    >
+                      <FileSpreadsheet size={14} /> Executivo (.xlsx)
+                    </button>
+                    <button
+                      disabled={exportandoPDF}
+                      onClick={async () => {
+                        setShowExportMenu(false)
+                        setExportandoPDF(true)
+                        await gerarRelatorioPDFExecutivo(atividades, dataInicio, valorVenda, resumo)
+                        setExportandoPDF(false)
+                      }}
+                      className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-red-50 hover:text-red-700 disabled:opacity-50"
+                    >
+                      <FileText size={14} /> {exportandoPDF ? 'Gerando...' : 'Relatório Executivo (.pdf)'}
+                    </button>
+                    <div className="border-t border-gray-100 my-1" />
+                    <p className="px-4 pt-1.5 pb-1 text-[10px] font-bold text-gray-400 uppercase tracking-widest">Gestão Completa</p>
+                    <button
+                      onClick={() => { setShowExportMenu(false); exportarExcel(atividades, dataInicio, valorVenda) }}
+                      className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-green-50 hover:text-green-700"
+                    >
+                      <FileSpreadsheet size={14} /> Todas as abas (.xlsx)
+                    </button>
+                    <button
+                      disabled={exportandoPDF}
+                      onClick={async () => {
+                        setShowExportMenu(false)
+                        setExportandoPDF(true)
+                        await gerarRelatorioPDFExecutivo(atividades, dataInicio, valorVenda, resumo)
+                        setExportandoPDF(false)
+                      }}
+                      className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-red-50 hover:text-red-700 disabled:opacity-50"
+                    >
+                      <FileText size={14} /> {exportandoPDF ? 'Gerando...' : 'Físico-Financeiro (.pdf)'}
+                    </button>
+                    <button
+                      disabled={exportandoPDF}
+                      onClick={async () => {
+                        setShowExportMenu(false)
+                        setExportandoPDF(true)
+                        setPrintAll(true)
+                        await new Promise(r => setTimeout(r, 120))
+                        await exportarPDF('#cronograma-resultado')
+                        setPrintAll(false)
+                        setExportandoPDF(false)
+                      }}
+                      className="w-full flex items-center gap-2 px-4 py-2 pb-2.5 text-sm text-gray-700 hover:bg-red-50 hover:text-red-700 disabled:opacity-50"
+                    >
+                      <FileText size={14} /> {exportandoPDF ? 'Gerando...' : 'Todas as abas (.pdf)'}
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
           {/* Aba Gantt */}
-          {abaAtiva === 'gantt' && (
+          {(printAll || abaAtiva === 'gantt') && (
             <div className="bg-white rounded-2xl border border-gray-200 p-4 shadow-sm">
               <div className="flex items-center gap-3 mb-4">
                 <h3 className="font-bold text-gray-800">Cronograma Físico — Gráfico de Gantt</h3>
@@ -1306,13 +1930,21 @@ export default function Cronograma() {
           )}
 
           {/* Aba Tabela */}
-          {abaAtiva === 'tabela' && (
+          {(printAll || abaAtiva === 'tabela') && (
             <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
               <div className="overflow-x-auto">
                 <table className="w-full text-xs">
                   <thead className="bg-gray-50 border-b border-gray-200">
                     <tr>
-                      {['', 'ID', 'EAP', 'Atividade', 'Etapa', 'Dur.', 'Início', 'Fim', 'Pred.', 'Recursos', 'Peso%', ...(valorVenda > 0 ? ['Valor (R$)'] : []), 'Acum%', 'CC'].map(h => (
+                      <th className="px-2 py-2 w-8">
+                        <input
+                          type="checkbox"
+                          checked={selecionados.size === atividades.length && atividades.length > 0}
+                          onChange={toggleSelecionarTodos}
+                          className="accent-blue-600 cursor-pointer"
+                        />
+                      </th>
+                      {['', 'ID', 'EAP', 'Atividade', 'Dur.', 'Início', 'Fim', 'Pred.', 'Recursos', 'Peso%', ...(valorVenda > 0 && !fontePDF ? ['Valor (R$)'] : []), 'Acum%', 'CC', ''].map(h => (
                         <th
                           key={h}
                           className="px-3 py-2 text-left font-semibold text-gray-600 whitespace-nowrap relative"
@@ -1320,6 +1952,17 @@ export default function Cronograma() {
                         >
                           {h === 'Pred.' ? (
                             <>Pred. <span className="text-[9px] font-normal text-gray-400">(3=TI · 3II=II)</span></>
+                          ) : h === 'Início' ? (
+                            <button
+                              onClick={() => setSortData(s => s === 'asc' ? 'desc' : s === 'desc' ? null : 'asc')}
+                              className="flex items-center gap-1 hover:text-blue-600 transition-colors"
+                              title="Ordenar por data de início"
+                            >
+                              Início
+                              <span className="text-[10px]">
+                                {sortData === 'asc' ? '▲' : sortData === 'desc' ? '▼' : '⇅'}
+                              </span>
+                            </button>
                           ) : h}
                           {h === 'Atividade' && (
                             <span
@@ -1351,7 +1994,7 @@ export default function Cronograma() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
-                    {atividades.map(a => {
+                    {atividadesOrdenadas.map(a => {
                       const inicio = new Date(dataInicio)
                       inicio.setDate(inicio.getDate() + (a.inicioDia - 1))
                       const fim = new Date(dataInicio)
@@ -1375,16 +2018,25 @@ export default function Cronograma() {
                             setDragId(null); setDragOverId(null)
                           }}
                           className={[
+                            'group',
                             isMae ? 'bg-gray-50 font-bold' : 'hover:bg-blue-50/30',
                             isDragging ? 'opacity-40' : '',
                             isDragOver ? 'border-t-2 border-blue-400' : '',
                             !isMae ? 'cursor-grab' : '',
                           ].join(' ')}
                         >
+                          <td className="px-2 py-1.5" onClick={e => e.stopPropagation()}>
+                            <input
+                              type="checkbox"
+                              checked={selecionados.has(a.id)}
+                              onChange={() => toggleSelecionado(a.id)}
+                              className="accent-blue-600 cursor-pointer"
+                            />
+                          </td>
                           <td className="px-1 py-1.5 text-gray-300 select-none">
                             {isMae ? (
                               <button
-                                onClick={() => adicionarServico(a.id)}
+                                onClick={(e) => { e.stopPropagation(); e.preventDefault(); adicionarServico(a.id) }}
                                 title="Adicionar serviço nesta atividade"
                                 className="text-gray-300 hover:text-blue-500 transition-colors"
                               >
@@ -1394,7 +2046,7 @@ export default function Cronograma() {
                           </td>
                           <td className="px-3 py-1.5">{a.id}</td>
                           <td className="px-3 py-1.5 font-mono">{a.eap}</td>
-                          <td className="px-3 py-1.5 overflow-hidden" style={{ paddingLeft: isMae ? 12 : 24, width: colAtividadeW, maxWidth: colAtividadeW }}>
+                          <td className="px-3 py-1.5" style={{ paddingLeft: isMae ? 12 : 24, width: colAtividadeW, minWidth: colAtividadeW }}>
                             {isMae && editingEtapaId === a.id ? (
                               <input
                                 autoFocus
@@ -1421,10 +2073,10 @@ export default function Cronograma() {
                                 className="w-full border border-blue-400 rounded px-1 py-0.5 text-xs focus:outline-none"
                               />
                             ) : (
-                              <span className="flex items-center gap-1 group min-w-0">
+                              <span className="flex items-center gap-1 group">
                                 <span
                                   style={{ color: isMae ? corEtapa(a.etapa) : undefined }}
-                                  className="truncate"
+                                  title={a.nome.replace('▸ ', '')}
                                 >
                                   {a.nome.replace('▸ ', '')}
                                 </span>
@@ -1446,25 +2098,7 @@ export default function Cronograma() {
                               </span>
                             )}
                           </td>
-                          <td className="px-3 py-1.5">
-                            {isMae ? (
-                              <span className="px-1.5 py-0.5 rounded text-[10px] font-medium text-white"
-                                style={{ background: corEtapa(a.etapa) }}>{a.etapa}</span>
-                            ) : (
-                              <select
-                                value={a.etapa}
-                                onChange={e => moverParaEtapa(a.id, e.target.value)}
-                                className="text-[10px] font-medium text-white rounded px-1 py-0.5 border-0 focus:outline-none focus:ring-1 focus:ring-blue-400"
-                                style={{ background: corEtapa(a.etapa) }}
-                              >
-                                {ETAPA_MAP.map(em => (
-                                  <option key={em.etapa} value={em.etapa} style={{ background: '#fff', color: '#374151' }}>{em.etapa}</option>
-                                ))}
-                                <option value="Outros Serviços" style={{ background: '#fff', color: '#374151' }}>Outros Serviços</option>
-                              </select>
-                            )}
-                          </td>
-                          <td className="px-3 py-1.5">
+                          <td className="px-3 py-1.5 whitespace-nowrap">
                             <input
                               type="number" min={1} value={a.duracaoDias}
                               onChange={e => updateAtividade(a.id, 'duracaoDias', e.target.value)}
@@ -1472,7 +2106,38 @@ export default function Cronograma() {
                             />
                             <span className="ml-0.5 text-gray-400">d</span>
                           </td>
-                          <td className="px-3 py-1.5 whitespace-nowrap">{inicio.toLocaleDateString('pt-BR')}</td>
+                          <td className="px-3 py-1.5 whitespace-nowrap">
+                            <div className="flex items-center gap-1">
+                              <button
+                                title={a.agendamento === 'manual' ? 'Manual — clique para automático' : 'Automático — clique para manual'}
+                                onClick={() => setAtividades(prev => recalcularDatas(prev.map(x =>
+                                  x.id !== a.id ? x : { ...x, agendamento: x.agendamento === 'manual' ? 'auto' : 'manual' }
+                                )))}
+                                className={`flex-shrink-0 transition-colors ${a.agendamento === 'manual' ? 'text-orange-500 hover:text-orange-700' : 'text-gray-300 hover:text-blue-500'}`}
+                              >
+                                {a.agendamento === 'manual' ? <Lock size={11} /> : <Unlock size={11} />}
+                              </button>
+                              {a.agendamento === 'manual' ? (
+                                <input
+                                  type="date"
+                                  value={inicio.toISOString().slice(0, 10)}
+                                  onChange={e => {
+                                    if (!e.target.value) return
+                                    const base = new Date(dataInicio)
+                                    const picked = new Date(e.target.value + 'T00:00:00')
+                                    const diffDias = Math.round((picked.getTime() - base.getTime()) / 86400000) + 1
+                                    const novoDia = Math.max(1, diffDias)
+                                    setAtividades(prev => recalcularDatas(prev.map(x =>
+                                      x.id !== a.id ? x : { ...x, inicioDia: novoDia, fimDia: novoDia + x.duracaoDias - 1 }
+                                    )))
+                                  }}
+                                  className="text-xs border border-orange-300 rounded px-1 py-0.5 focus:outline-none focus:border-orange-500 bg-orange-50"
+                                />
+                              ) : (
+                                <span>{inicio.toLocaleDateString('pt-BR')}</span>
+                              )}
+                            </div>
+                          </td>
                           <td className="px-3 py-1.5 whitespace-nowrap">{fim.toLocaleDateString('pt-BR')}</td>
                           <td className="px-3 py-1.5">
                             <input
@@ -1492,9 +2157,9 @@ export default function Cronograma() {
                             />
                           </td>
                           <td className="px-3 py-1.5">{a.peso.toFixed(1)}%</td>
-                          {valorVenda > 0 && (
+                          {valorVenda > 0 && !fontePDF && (
                             <td className="px-3 py-1.5 whitespace-nowrap font-medium text-green-700">
-                              {(a.peso / 100 * valorVenda).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })}
+                              {isMae ? (a.peso / 100 * valorVenda).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 }) : '—'}
                             </td>
                           )}
                           <td className="px-3 py-1.5">
@@ -1508,6 +2173,15 @@ export default function Cronograma() {
                           <td className="px-3 py-1.5">
                             {a.caminhoCritico ? <span className="text-red-600 font-bold">CC</span> : '—'}
                           </td>
+                          <td className="px-2 py-1.5">
+                            <button
+                              onClick={(e) => { e.stopPropagation(); apagarAtividade(a.id) }}
+                              title={isMae ? 'Apagar atividade e serviços' : 'Apagar serviço'}
+                              className="opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-500 transition-all"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </td>
                         </tr>
                       )
                     })}
@@ -1518,7 +2192,7 @@ export default function Cronograma() {
           )}
 
           {/* Aba Curva S */}
-          {abaAtiva === 'curvaS' && (
+          {(printAll || abaAtiva === 'curvaS') && (
             <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
               <h3 className="font-bold text-gray-800 mb-4">Curva S — Avanço Físico-Financeiro Acumulado</h3>
               <CurvaS atividades={atividades} totalDias={totalDias} valorVenda={valorVenda} />
@@ -1550,7 +2224,7 @@ export default function Cronograma() {
           )}
 
           {/* Aba Físico-Financeiro */}
-          {abaAtiva === 'fisicoFinanceiro' && (
+          {(printAll || abaAtiva === 'fisicoFinanceiro') && (
             <FisicoFinanceiro
               atividades={atividades}
               totalDias={totalDias}
@@ -1560,7 +2234,7 @@ export default function Cronograma() {
           )}
 
           {/* Aba Riscos */}
-          {abaAtiva === 'riscos' && (
+          {(printAll || abaAtiva === 'riscos') && (
             <div className="space-y-4">
               <div className="bg-white rounded-2xl border border-gray-200 p-5 shadow-sm">
                 <h3 className="font-bold text-gray-800 mb-4">Principais Riscos de Prazo</h3>
@@ -1605,6 +2279,106 @@ export default function Cronograma() {
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* ── Modal Nuvem ──────────────────────────────────────────────────── */}
+      {modalNuvem && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden">
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+              <div className="flex gap-2">
+                <button
+                  onClick={() => { setModalNuvem('salvar'); setNuvemErro(''); setNuvemSucesso('') }}
+                  className={`px-4 py-1.5 rounded-lg text-sm font-semibold transition-colors ${modalNuvem === 'salvar' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-100'}`}
+                >
+                  <Save size={13} className="inline mr-1" /> Salvar
+                </button>
+                <button
+                  onClick={() => { setModalNuvem('carregar'); setNuvemErro(''); setNuvemSucesso(''); carregarListaNuvem() }}
+                  className={`px-4 py-1.5 rounded-lg text-sm font-semibold transition-colors ${modalNuvem === 'carregar' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-100'}`}
+                >
+                  <CloudDownload size={13} className="inline mr-1" /> Carregar
+                </button>
+              </div>
+              <button onClick={() => setModalNuvem(null)} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
+            </div>
+
+            <div className="px-6 py-5">
+              {!supabase && (
+                <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4 text-sm text-yellow-800 mb-4">
+                  <strong>Supabase não configurado.</strong> Adicione <code>VITE_SUPABASE_URL</code> e <code>VITE_SUPABASE_ANON_KEY</code> no arquivo <code>.env</code> e reinicie o servidor.
+                </div>
+              )}
+
+              {/* Aba Salvar */}
+              {modalNuvem === 'salvar' && (
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Nome do cronograma</label>
+                    <input
+                      autoFocus
+                      type="text"
+                      value={nomeNuvem}
+                      onChange={e => setNomeNuvem(e.target.value)}
+                      onKeyDown={e => e.key === 'Enter' && salvarNaNuvem()}
+                      placeholder="Ex: Obra IPEM MT — Etapa 2"
+                      className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                    />
+                  </div>
+                  {nuvemErro && <p className="text-sm text-red-600">{nuvemErro}</p>}
+                  {nuvemSucesso && <p className="text-sm text-green-600 font-semibold">{nuvemSucesso}</p>}
+                  <button
+                    onClick={salvarNaNuvem}
+                    disabled={nuvemLoading || !supabase}
+                    className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-semibold py-2.5 rounded-xl transition-colors"
+                  >
+                    {nuvemLoading ? <Loader2 size={16} className="animate-spin" /> : <Cloud size={16} />}
+                    {nuvemLoading ? 'Salvando...' : 'Salvar na nuvem'}
+                  </button>
+                </div>
+              )}
+
+              {/* Aba Carregar */}
+              {modalNuvem === 'carregar' && (
+                <div>
+                  {nuvemLoading && (
+                    <div className="flex justify-center py-8"><Loader2 size={24} className="animate-spin text-blue-500" /></div>
+                  )}
+                  {nuvemErro && <p className="text-sm text-red-600 mb-3">{nuvemErro}</p>}
+                  {!nuvemLoading && listaNuvem.length === 0 && (
+                    <p className="text-center text-gray-400 text-sm py-8">Nenhum cronograma salvo na nuvem.</p>
+                  )}
+                  <div className="space-y-2 max-h-72 overflow-y-auto">
+                    {listaNuvem.map(item => (
+                      <div key={item.id} className="flex items-center gap-3 p-3 border border-gray-200 rounded-xl hover:bg-blue-50 transition-colors">
+                        <div className="flex-1 min-w-0">
+                          <p className="font-semibold text-sm text-gray-800 truncate">{item.nome}</p>
+                          <p className="text-xs text-gray-400">
+                            {new Date(item.atualizado_em ?? item.criado_em).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                          </p>
+                        </div>
+                        <button
+                          onClick={() => carregarCronogramaNuvem(item)}
+                          className="text-xs bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg font-semibold transition-colors"
+                        >
+                          Abrir
+                        </button>
+                        <button
+                          onClick={() => apagarNuvem(item.id)}
+                          className="text-gray-300 hover:text-red-500 transition-colors"
+                          title="Apagar"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       )}
     </div>

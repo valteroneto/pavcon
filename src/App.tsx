@@ -1,6 +1,8 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
-import { ObrasProvider } from './contexts/ObrasContext'
+import { ObrasProvider, useObras } from './contexts/ObrasContext'
+import { useAlertas } from './hooks/useAlertas'
+import { useNotificacoesAlertas } from './hooks/useNotificacoes'
 import { AprovacoesProvider } from './contexts/AprovacoesContext'
 import { FaturamentoProvider } from './contexts/FaturamentoContext'
 import { AnexosProvider } from './contexts/AnexosContext'
@@ -23,6 +25,13 @@ import RedefinirSenha from './pages/RedefinirSenha'
 import Alertas from './pages/Alertas'
 import Cronograma from './pages/Cronograma'
 
+function NotificacoesWatcher() {
+  const { obras } = useObras()
+  const alertas = useAlertas(obras)
+  useNotificacoesAlertas(alertas)
+  return null
+}
+
 function AppRoutes() {
   const { user } = useAuth()
 
@@ -43,6 +52,7 @@ function AppRoutes() {
     <BrowserRouter>
       <div className="min-h-screen bg-slate-50 flex">
         <Sidebar />
+        <NotificacoesWatcher />
         <main className="flex-1 md:ml-60 pt-14 md:pt-0 min-h-screen">
           <div className="p-4 md:p-6 max-w-screen-2xl mx-auto">
             <Routes>
