@@ -1126,7 +1126,7 @@ export default function Cronograma() {
             <div className="flex gap-1 bg-gray-100 rounded-xl p-1">
               {([
                 { id: 'gantt', label: 'Gantt' },
-                { id: 'tabela', label: 'Tabela' },
+                { id: 'tabela', label: 'Executivo' },
                 { id: 'curvaS', label: 'Curva S' },
                 { id: 'fisicoFinanceiro', label: 'Físico-Financeiro' },
                 { id: 'riscos', label: 'Riscos' },
