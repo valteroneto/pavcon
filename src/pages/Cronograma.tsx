@@ -79,38 +79,41 @@ interface ServicoOrcamento {
   quantidade: number
   valorUnitario: number
   valorTotal: number
+  etapaExplicita?: string   // etapa lida diretamente do documento
 }
 
 function parseOrcamento(wb: XLSX.WorkBook): ServicoOrcamento[] {
   const servicos: ServicoOrcamento[] = []
+  const ignorar = ['descrição', 'item', 'código', 'total', 'subtotal', 'bdi', 'valor', 'referência', 'composição']
 
   for (const sheetName of wb.SheetNames) {
     const sheet = wb.Sheets[sheetName]
     const rows: unknown[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' }) as unknown[][]
+    let currentEtapaExplicita = ''
 
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i]
-      if (!row || row.length < 3) continue
+      if (!row || row.length < 2) continue
 
-      // Detecta linhas com descrição + valor numérico
       const cells = row.map(c => String(c ?? '').trim())
       const descIdx = cells.findIndex(c => c.length > 5 && isNaN(Number(c.replace(',', '.'))))
       if (descIdx < 0) continue
 
       const desc = cells[descIdx]
       if (!desc || desc.length < 4) continue
-
-      // Ignora cabeçalhos comuns
-      const ignorar = ['descrição', 'item', 'código', 'total', 'subtotal', 'bdi', 'valor', 'referência', 'composição']
       if (ignorar.some(ig => desc.toLowerCase().startsWith(ig))) continue
 
-      // Procura valores numéricos na linha
       const nums = cells
         .filter((_, idx) => idx !== descIdx)
         .map(c => parseFloat(c.replace(/\./g, '').replace(',', '.')))
         .filter(n => !isNaN(n) && n > 0)
 
-      if (nums.length === 0) continue
+      // Linha sem valores numéricos expressivos → candidata a cabeçalho de seção
+      if (nums.filter(n => n > 100).length === 0) {
+        const cabecalho = detectarCabecalhoSecao(desc)
+        if (cabecalho) { currentEtapaExplicita = cabecalho }
+        continue
+      }
 
       const valorTotal = Math.max(...nums)
       if (valorTotal < 1) continue
@@ -123,6 +126,7 @@ function parseOrcamento(wb: XLSX.WorkBook): ServicoOrcamento[] {
         quantidade: nums.length >= 2 ? nums[0] : 1,
         valorUnitario: nums.length >= 3 ? nums[nums.length - 2] : valorTotal,
         valorTotal,
+        etapaExplicita: currentEtapaExplicita || undefined,
       })
     }
   }
@@ -156,18 +160,19 @@ function extrairLinhasPDF(items: any[]): string[] {
 function parseSienge(linhas: string[]): ServicoOrcamento[] {
   const servicos: ServicoOrcamento[] = []
   let currentServico = ''
+  let currentEtapaExplicita = ''
 
   for (const linha of linhas) {
-    // Cabeçalho de etapa — apenas rastreia contexto
-    if (/^Etapa\s+[\d.]+\s*[-–]/i.test(linha)) {
+    // Cabeçalho de etapa: "Etapa 01.001 - SERVIÇOS PRELIMINARES"
+    const mEtapa = linha.match(/^Etapa\s+[\d.]+\s*[-–]\s*(.+)$/i)
+    if (mEtapa) {
+      currentEtapaExplicita = mEtapa[1].trim()
       currentServico = ''
       continue
     }
 
-    // Cabeçalho de subetapa — ignora
-    if (/^Subetapa\s+[\d.]+\s*[-–]/i.test(linha)) {
-      continue
-    }
+    // Cabeçalho de subetapa — ignora (herda etapa pai)
+    if (/^Subetapa\s+[\d.]+\s*[-–]/i.test(linha)) continue
 
     // Cabeçalho de serviço: "Serviço 00.001.001.001 - NOME DO SERVIÇO"
     const mServ = linha.match(/^Servi[çc]o\s+[\d.]+\s*[-–]\s*(.+)$/i)
@@ -187,14 +192,14 @@ function parseSienge(linhas: string[]): ServicoOrcamento[] {
           quantidade: 1,
           valorUnitario: valor,
           valorTotal: valor,
+          etapaExplicita: currentEtapaExplicita || undefined,
         })
       }
       currentServico = ''
       continue
     }
 
-    // Linha de insumo: "CÓDIGO DESCRIÇÃO UN QTD PREÇO_UN PREÇO_TOTAL DATA"
-    // ex: "13549 PLACA DE OBRA und 1,0000 1.500,0000 1.500,00 08/07/2025"
+    // Linha de insumo avulso (sem serviço pai)
     const mInsumo = linha.match(
       /^\d{3,}\s+(.+?)\s+(und?|m[²³23]?|kg|vb|gl|cj|l|h|t|pç|pc|rl|cx|sc|sv|hr|d)\s+([\d.,]+)\s+[\d.]+,\d{4}\s+([\d.]+,\d{2})\s+\d{2}\/\d{2}\/\d{4}$/i
     )
@@ -210,6 +215,7 @@ function parseSienge(linhas: string[]): ServicoOrcamento[] {
           quantidade: qtd,
           valorUnitario: total / (qtd || 1),
           valorTotal: total,
+          etapaExplicita: currentEtapaExplicita || undefined,
         })
       }
     }
@@ -218,13 +224,38 @@ function parseSienge(linhas: string[]): ServicoOrcamento[] {
   return servicos
 }
 
+// Detecta se uma linha é cabeçalho de seção do orçamento (sem valores, texto longo)
+function detectarCabecalhoSecao(linha: string): string | null {
+  const nums = [...linha.matchAll(/[\d.,]+/g)]
+    .map(m => parseBRL(m[0]))
+    .filter(n => !isNaN(n) && n > 100)
+  if (nums.length > 0) return null   // tem valores → não é cabeçalho
+
+  const texto = linha.replace(/^\d+[\s.)-]+/, '').trim()  // remove numeração inicial
+  if (texto.length < 5 || texto.length > 120) return null
+
+  // É cabeçalho se contém palavra-chave de etapa OU é tudo maiúsculas com mais de 8 chars
+  const temKeyword = ETAPA_MAP.some(e => e.keywords.some(k => texto.toLowerCase().includes(k)))
+  const eMaiusculas = texto === texto.toUpperCase() && texto.length > 8 && /[A-ZÀ-Ú]/.test(texto)
+
+  return (temKeyword || eMaiusculas) ? texto : null
+}
+
 function parseGenericLinhas(linhas: string[]): ServicoOrcamento[] {
   const servicos: ServicoOrcamento[] = []
   const ignorar = ['descrição', 'item', 'código', 'total geral', 'subtotal', 'bdi', 'valor total', 'referência']
+  let currentEtapaExplicita = ''
 
   for (const limpa of linhas) {
     if (limpa.length < 6) continue
     if (ignorar.some(ig => limpa.toLowerCase().startsWith(ig))) continue
+
+    // Tenta capturar cabeçalho de seção
+    const cabecalho = detectarCabecalhoSecao(limpa)
+    if (cabecalho) {
+      currentEtapaExplicita = cabecalho
+      continue
+    }
 
     const nums = [...limpa.matchAll(/[\d.,]+/g)]
       .map(m => parseBRL(m[0]))
@@ -249,6 +280,7 @@ function parseGenericLinhas(linhas: string[]): ServicoOrcamento[] {
       quantidade: nums.length >= 2 ? nums[0] : 1,
       valorUnitario: nums.length >= 3 ? nums[nums.length - 2] : valorTotal,
       valorTotal,
+      etapaExplicita: currentEtapaExplicita || undefined,
     })
   }
 
@@ -288,10 +320,14 @@ async function parseOrcamentoPDF(buf: ArrayBuffer): Promise<ServicoOrcamento[]> 
 function gerarCronograma(servicos: ServicoOrcamento[], dataInicio: string): { atividades: Atividade[]; resumo: Resumo } {
   const totalCusto = servicos.reduce((s, sv) => s + sv.valorTotal, 0) || 1
 
-  // Agrupa por etapa
+  // Agrupa por etapa — usa etapaExplicita do documento quando disponível,
+  // cai em detecção por palavra-chave apenas como fallback
   const grupos: Record<string, ServicoOrcamento[]> = {}
   for (const s of servicos) {
-    const e = detectarEtapa(s.descricao)
+    const eExplicita = s.etapaExplicita ? detectarEtapa(s.etapaExplicita) : null
+    const e = eExplicita !== 'Outros Serviços' && eExplicita
+      ? eExplicita
+      : detectarEtapa(s.descricao)
     if (!grupos[e]) grupos[e] = []
     grupos[e].push(s)
   }
