@@ -570,6 +570,24 @@ export default function Cronograma() {
   const [atividades, setAtividades] = useState<Atividade[]>([])
   const [resumo, setResumo] = useState<Resumo | null>(null)
   const [abaAtiva, setAbaAtiva] = useState<'gantt' | 'tabela' | 'curvaS' | 'riscos'>('gantt')
+  const [dragId, setDragId] = useState<string | null>(null)
+  const [dragOverId, setDragOverId] = useState<string | null>(null)
+
+  function moverParaEtapa(servicoId: string, novaEtapa: string) {
+    setAtividades(prev => prev.map(a => a.id === servicoId ? { ...a, etapa: novaEtapa } : a))
+  }
+
+  function reordenarAtividades(draggedId: string, targetId: string) {
+    setAtividades(prev => {
+      const arr = [...prev]
+      const fromIdx = arr.findIndex(a => a.id === draggedId)
+      const toIdx = arr.findIndex(a => a.id === targetId)
+      if (fromIdx === -1 || toIdx === -1 || fromIdx === toIdx) return prev
+      const [item] = arr.splice(fromIdx, 1)
+      arr.splice(toIdx, 0, item)
+      return arr
+    })
+  }
 
   const totalDias = useMemo(() =>
     atividades.length ? Math.max(...atividades.map(a => a.fimDia)) : 0
@@ -808,7 +826,7 @@ export default function Cronograma() {
                 <table className="w-full text-xs">
                   <thead className="bg-gray-50 border-b border-gray-200">
                     <tr>
-                      {['ID', 'EAP', 'Atividade', 'Etapa', 'Dur.', 'Início', 'Fim', 'Pred.', 'Recursos', 'Peso%', 'Acum%', 'CC'].map(h => (
+                      {['', 'ID', 'EAP', 'Atividade', 'Etapa', 'Dur.', 'Início', 'Fim', 'Pred.', 'Recursos', 'Peso%', 'Acum%', 'CC'].map(h => (
                         <th key={h} className="px-3 py-2 text-left font-semibold text-gray-600 whitespace-nowrap">{h}</th>
                       ))}
                     </tr>
@@ -816,20 +834,58 @@ export default function Cronograma() {
                   <tbody className="divide-y divide-gray-100">
                     {atividades.map(a => {
                       const inicio = new Date(dataInicio)
-                      inicio.setDate(inicio.getDate() + (a.inicioDia - 1) * 7)
+                      inicio.setDate(inicio.getDate() + (a.inicioDia - 1))
                       const fim = new Date(dataInicio)
-                      fim.setDate(fim.getDate() + (a.fimDia - 1) * 7 + 6)
+                      fim.setDate(fim.getDate() + (a.fimDia - 1))
                       const isMae = a.nome.startsWith('▸')
+                      const isDragging = dragId === a.id
+                      const isDragOver = dragOverId === a.id
                       return (
-                        <tr key={a.id} className={isMae ? 'bg-gray-50 font-bold' : 'hover:bg-blue-50/30'}>
+                        <tr
+                          key={a.id}
+                          draggable={!isMae}
+                          onDragStart={() => !isMae && setDragId(a.id)}
+                          onDragEnd={() => { setDragId(null); setDragOverId(null) }}
+                          onDragOver={e => { e.preventDefault(); if (!isMae && dragId !== a.id) setDragOverId(a.id) }}
+                          onDragLeave={() => setDragOverId(null)}
+                          onDrop={e => {
+                            e.preventDefault()
+                            if (dragId && dragId !== a.id) {
+                              reordenarAtividades(dragId, a.id)
+                              if (!isMae) moverParaEtapa(dragId, a.etapa)
+                            }
+                            setDragId(null); setDragOverId(null)
+                          }}
+                          className={[
+                            isMae ? 'bg-gray-50 font-bold' : 'hover:bg-blue-50/30',
+                            isDragging ? 'opacity-40' : '',
+                            isDragOver ? 'border-t-2 border-blue-400' : '',
+                            !isMae ? 'cursor-grab' : '',
+                          ].join(' ')}
+                        >
+                          <td className="px-3 py-1.5 text-gray-300 select-none">{!isMae ? '⠿' : ''}</td>
                           <td className="px-3 py-1.5">{a.id}</td>
                           <td className="px-3 py-1.5 font-mono">{a.eap}</td>
                           <td className="px-3 py-1.5 max-w-[180px] truncate" style={{ paddingLeft: isMae ? 12 : 24 }}>
                             <span style={{ color: isMae ? corEtapa(a.etapa) : undefined }}>{a.nome.replace('▸ ', '')}</span>
                           </td>
                           <td className="px-3 py-1.5">
-                            <span className="px-1.5 py-0.5 rounded text-[10px] font-medium text-white"
-                              style={{ background: corEtapa(a.etapa) }}>{a.etapa}</span>
+                            {isMae ? (
+                              <span className="px-1.5 py-0.5 rounded text-[10px] font-medium text-white"
+                                style={{ background: corEtapa(a.etapa) }}>{a.etapa}</span>
+                            ) : (
+                              <select
+                                value={a.etapa}
+                                onChange={e => moverParaEtapa(a.id, e.target.value)}
+                                className="text-[10px] font-medium text-white rounded px-1 py-0.5 border-0 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                                style={{ background: corEtapa(a.etapa) }}
+                              >
+                                {ETAPA_MAP.map(em => (
+                                  <option key={em.etapa} value={em.etapa} style={{ background: '#fff', color: '#374151' }}>{em.etapa}</option>
+                                ))}
+                                <option value="Outros Serviços" style={{ background: '#fff', color: '#374151' }}>Outros Serviços</option>
+                              </select>
+                            )}
                           </td>
                           <td className="px-3 py-1.5">
                             <input
