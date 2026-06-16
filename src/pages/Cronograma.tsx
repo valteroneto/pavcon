@@ -864,6 +864,14 @@ export default function Cronograma() {
   const [dragOverId, setDragOverId] = useState<string | null>(null)
   const [editingEtapaId, setEditingEtapaId] = useState<string | null>(null)
   const [editingEtapaNome, setEditingEtapaNome] = useState('')
+  const [editingNomeId, setEditingNomeId] = useState<string | null>(null)
+  const [editingNomeValor, setEditingNomeValor] = useState('')
+
+  function renomearAtividade(id: string, novoNome: string) {
+    const nome = novoNome.trim()
+    if (nome) setAtividades(prev => prev.map(a => a.id === id ? { ...a, nome } : a))
+    setEditingNomeId(null)
+  }
 
   function recalcularEAP(arr: Atividade[]): Atividade[] {
     let etapaIdx = 0
@@ -1272,15 +1280,32 @@ export default function Cronograma() {
                                 className="w-full border border-blue-400 rounded px-1 py-0.5 text-xs font-bold focus:outline-none"
                                 style={{ color: corEtapa(a.etapa) }}
                               />
+                            ) : editingNomeId === a.id ? (
+                              <input
+                                autoFocus
+                                value={editingNomeValor}
+                                onChange={e => setEditingNomeValor(e.target.value)}
+                                onBlur={() => renomearAtividade(a.id, editingNomeValor)}
+                                onKeyDown={e => {
+                                  if (e.key === 'Enter') renomearAtividade(a.id, editingNomeValor)
+                                  if (e.key === 'Escape') setEditingNomeId(null)
+                                }}
+                                className="w-full border border-blue-400 rounded px-1 py-0.5 text-xs focus:outline-none"
+                              />
                             ) : (
                               <span
                                 style={{ color: isMae ? corEtapa(a.etapa) : undefined }}
-                                title={isMae ? 'Duplo clique para renomear' : undefined}
-                                onDoubleClick={isMae ? () => {
-                                  setEditingEtapaId(a.id)
-                                  setEditingEtapaNome(a.etapa)
-                                } : undefined}
-                                className={isMae ? 'cursor-text truncate block' : 'truncate block'}
+                                title="Duplo clique para renomear"
+                                onDoubleClick={() => {
+                                  if (isMae) {
+                                    setEditingEtapaId(a.id)
+                                    setEditingEtapaNome(a.etapa)
+                                  } else {
+                                    setEditingNomeId(a.id)
+                                    setEditingNomeValor(a.nome)
+                                  }
+                                }}
+                                className="cursor-text truncate block"
                               >
                                 {a.nome.replace('▸ ', '')}
                               </span>
