@@ -19,9 +19,9 @@ interface Atividade {
   eap: string
   nome: string
   etapa: string
-  duracaoSemanas: number
-  inicioSemana: number   // semana 1-based
-  fimSemana: number
+  duracaoDias: number
+  inicioDia: number   // semana 1-based
+  fimDia: number
   predecessoras: string
   recursos: string
   peso: number           // % do custo total
@@ -313,8 +313,8 @@ function gerarCronograma(servicos: ServicoOrcamento[], dataInicio: string): { at
     const custoEtapa = svsEtapa.reduce((s, sv) => s + sv.valorTotal, 0)
     const pesoEtapa = (custoEtapa / totalCusto) * 100
 
-    // Duração da etapa proporcional ao peso (mín 1, máx 12 semanas)
-    const duracaoEtapa = Math.max(1, Math.min(12, Math.round(pesoEtapa / 5)))
+    // Duração da etapa proporcional ao peso (mín 1, máx 84 dias)
+    const duracaoEtapa = Math.max(1, Math.min(84, Math.round(pesoEtapa / 5 * 7)))
 
     const idEtapa = `${idCounter++}`
     etapasIds[etapa] = idEtapa
@@ -338,9 +338,9 @@ function gerarCronograma(servicos: ServicoOrcamento[], dataInicio: string): { at
         eap: `${idEtapa}.${si + 1}`,
         nome: sv.descricao.length > 60 ? sv.descricao.slice(0, 57) + '...' : sv.descricao,
         etapa,
-        duracaoSemanas: durSub,
-        inicioSemana: subSemana,
-        fimSemana: fim,
+        duracaoDias: durSub,
+        inicioDia: subSemana,
+        fimDia: fim,
         predecessoras: si === 0 ? '' : String(idCounter - 2),
         recursos: sv.unidade !== 'vb' ? `Equipe ${etapa.split(' ')[0]}` : 'Equipe Geral',
         peso: pesoSub,
@@ -357,9 +357,9 @@ function gerarCronograma(servicos: ServicoOrcamento[], dataInicio: string): { at
       eap: idEtapa,
       nome: `▸ ${etapa}`,
       etapa,
-      duracaoSemanas: duracaoEtapa,
-      inicioSemana: inicioEtapa,
-      fimSemana: fimEtapa,
+      duracaoDias: duracaoEtapa,
+      inicioDia: inicioEtapa,
+      fimDia: fimEtapa,
       predecessoras: atividades.length > 0 ? String(atividades[atividades.length - 1].id) : '',
       recursos: '',
       peso: pesoEtapa,
@@ -377,9 +377,9 @@ function gerarCronograma(servicos: ServicoOrcamento[], dataInicio: string): { at
     eap: String(etapasOrdenadas.length + 1),
     nome: '🏁 Entrega da Obra',
     etapa: 'Marco',
-    duracaoSemanas: 0,
-    inicioSemana: semanaAtual,
-    fimSemana: semanaAtual,
+    duracaoDias: 0,
+    inicioDia: semanaAtual,
+    fimDia: semanaAtual,
     predecessoras: String(idCounter - 1),
     recursos: '',
     peso: 0,
@@ -428,15 +428,15 @@ function exportarExcel(atividades: Atividade[], dataInicio: string) {
   const inicio = new Date(dataInicio)
   const rows = atividades.map(a => {
     const di = new Date(inicio)
-    di.setDate(di.getDate() + (a.inicioSemana - 1) * 7)
+    di.setDate(di.getDate() + (a.inicioDia - 1))
     const df = new Date(inicio)
-    df.setDate(df.getDate() + (a.fimSemana - 1) * 7 + 6)
+    df.setDate(df.getDate() + (a.fimDia - 1))
     return {
       'ID': a.id,
       'EAP': a.eap,
       'Atividade': a.nome.replace('▸ ', ''),
       'Etapa': a.etapa,
-      'Duração (sem.)': a.duracaoSemanas,
+      'Duração (dias)': a.duracaoDias,
       'Início': di.toLocaleDateString('pt-BR'),
       'Término': df.toLocaleDateString('pt-BR'),
       'Predecessoras': a.predecessoras,
@@ -454,8 +454,8 @@ function exportarExcel(atividades: Atividade[], dataInicio: string) {
 
 // ─── Componente Gantt ─────────────────────────────────────────────────────────
 
-function GanttChart({ atividades, totalSemanas }: { atividades: Atividade[]; totalSemanas: number }) {
-  const cols = Math.min(totalSemanas, 52)
+function GanttChart({ atividades, totalDias }: { atividades: Atividade[]; totalDias: number }) {
+  const cols = Math.min(totalDias, 120)
 
   return (
     <div className="overflow-x-auto">
@@ -487,13 +487,13 @@ function GanttChart({ atividades, totalSemanas }: { atividades: Atividade[]; tot
               {/* Células do Gantt */}
               {Array.from({ length: cols }, (_, i) => {
                 const sem = i + 1
-                const ativo = !isMarca && sem >= a.inicioSemana && sem <= Math.min(a.fimSemana, cols)
-                const isInicio = sem === a.inicioSemana
-                const isFim = sem === Math.min(a.fimSemana, cols)
+                const ativo = !isMarca && sem >= a.inicioDia && sem <= Math.min(a.fimDia, cols)
+                const isInicio = sem === a.inicioDia
+                const isFim = sem === Math.min(a.fimDia, cols)
                 return (
                   <div key={i} className="flex-shrink-0 border-l border-gray-100 h-full flex items-center justify-center"
                     style={{ width: 22 }}>
-                    {isMarca && sem === a.inicioSemana ? (
+                    {isMarca && sem === a.inicioDia ? (
                       <div className="w-3 h-3 rotate-45" style={{ background: '#dc2626' }} />
                     ) : ativo ? (
                       <div className="w-full h-3/4 relative"
@@ -515,16 +515,16 @@ function GanttChart({ atividades, totalSemanas }: { atividades: Atividade[]; tot
 
 // ─── Curva S ──────────────────────────────────────────────────────────────────
 
-function CurvaS({ atividades, totalSemanas }: { atividades: Atividade[]; totalSemanas: number }) {
+function CurvaS({ atividades, totalDias }: { atividades: Atividade[]; totalDias: number }) {
   const pontos = useMemo(() => {
-    const semanas = Math.min(totalSemanas, 52)
+    const semanas = Math.min(totalDias, 120)
     return Array.from({ length: semanas + 1 }, (_, s) => {
       const acum = atividades
-        .filter(a => !a.nome.startsWith('▸') && !a.marco && a.fimSemana <= s)
+        .filter(a => !a.nome.startsWith('▸') && !a.marco && a.fimDia <= s)
         .reduce((sum, a) => sum + a.peso, 0)
       return Math.min(100, acum)
     })
-  }, [atividades, totalSemanas])
+  }, [atividades, totalDias])
 
   const W = 600, H = 200
   const padL = 40, padB = 30, padR = 20, padT = 10
@@ -554,7 +554,7 @@ function CurvaS({ atividades, totalSemanas }: { atividades: Atividade[]; totalSe
         return <circle key={i} cx={toX(origIdx)} cy={toY(v)} r={3} fill="#2563eb" />
       })}
       {/* Eixo X label */}
-      <text x={W / 2} y={H - 2} textAnchor="middle" fontSize={9} fill="#6b7280">Semanas</text>
+      <text x={W / 2} y={H - 2} textAnchor="middle" fontSize={9} fill="#6b7280">Dias</text>
     </svg>
   )
 }
@@ -571,16 +571,16 @@ export default function Cronograma() {
   const [resumo, setResumo] = useState<Resumo | null>(null)
   const [abaAtiva, setAbaAtiva] = useState<'gantt' | 'tabela' | 'curvaS' | 'riscos'>('gantt')
 
-  const totalSemanas = useMemo(() =>
-    atividades.length ? Math.max(...atividades.map(a => a.fimSemana)) : 0
+  const totalDias = useMemo(() =>
+    atividades.length ? Math.max(...atividades.map(a => a.fimDia)) : 0
   , [atividades])
 
-  function updateAtividade(id: string, campo: 'duracaoSemanas' | 'predecessoras' | 'recursos', valor: string) {
+  function updateAtividade(id: string, campo: 'duracaoDias' | 'predecessoras' | 'recursos', valor: string) {
     setAtividades(prev => prev.map(a => {
       if (a.id !== id) return a
-      if (campo === 'duracaoSemanas') {
+      if (campo === 'duracaoDias') {
         const dur = Math.max(1, parseInt(valor) || 1)
-        return { ...a, duracaoSemanas: dur, fimSemana: a.inicioSemana + dur - 1 }
+        return { ...a, duracaoDias: dur, fimDia: a.inicioDia + dur - 1 }
       }
       return { ...a, [campo]: valor }
     }))
@@ -740,7 +740,7 @@ export default function Cronograma() {
           {/* Resumo executivo */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             {[
-              { label: 'Prazo Total', value: `${resumo.prazoTotal} semanas`, sub: `≈ ${Math.round(resumo.prazoTotal / 4.3)} meses`, icon: Clock, cor: '#2563eb' },
+              { label: 'Prazo Total', value: `${resumo.prazoTotal} dias`, sub: `≈ ${Math.round(resumo.prazoTotal / 30)} meses`, icon: Clock, cor: '#2563eb' },
               { label: 'Atividades', value: resumo.totalAtividades, sub: `em ${resumo.etapas.length} etapas`, icon: Layers, cor: '#059669' },
               { label: 'Etapas', value: resumo.etapas.length, sub: 'identificadas', icon: ChevronRight, cor: '#d97706' },
               { label: 'Caminho Crítico', value: `${resumo.caminhoCritico.length} etapas`, sub: resumo.caminhoCritico.slice(0, 2).join(' → '), icon: TrendingUp, cor: '#dc2626' },
@@ -797,7 +797,7 @@ export default function Cronograma() {
                 <span className="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-medium">■ Caminho crítico</span>
                 <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">◻ Não crítico</span>
               </div>
-              <GanttChart atividades={atividades} totalSemanas={totalSemanas} />
+              <GanttChart atividades={atividades} totalDias={totalDias} />
             </div>
           )}
 
@@ -816,9 +816,9 @@ export default function Cronograma() {
                   <tbody className="divide-y divide-gray-100">
                     {atividades.map(a => {
                       const inicio = new Date(dataInicio)
-                      inicio.setDate(inicio.getDate() + (a.inicioSemana - 1) * 7)
+                      inicio.setDate(inicio.getDate() + (a.inicioDia - 1) * 7)
                       const fim = new Date(dataInicio)
-                      fim.setDate(fim.getDate() + (a.fimSemana - 1) * 7 + 6)
+                      fim.setDate(fim.getDate() + (a.fimDia - 1) * 7 + 6)
                       const isMae = a.nome.startsWith('▸')
                       return (
                         <tr key={a.id} className={isMae ? 'bg-gray-50 font-bold' : 'hover:bg-blue-50/30'}>
@@ -833,11 +833,11 @@ export default function Cronograma() {
                           </td>
                           <td className="px-3 py-1.5">
                             <input
-                              type="number" min={1} value={a.duracaoSemanas}
-                              onChange={e => updateAtividade(a.id, 'duracaoSemanas', e.target.value)}
+                              type="number" min={1} value={a.duracaoDias}
+                              onChange={e => updateAtividade(a.id, 'duracaoDias', e.target.value)}
                               className="w-14 border border-gray-200 rounded px-1 py-0.5 text-center focus:outline-none focus:border-blue-400 bg-transparent"
                             />
-                            <span className="ml-0.5 text-gray-400">sem</span>
+                            <span className="ml-0.5 text-gray-400">d</span>
                           </td>
                           <td className="px-3 py-1.5 whitespace-nowrap">{inicio.toLocaleDateString('pt-BR')}</td>
                           <td className="px-3 py-1.5 whitespace-nowrap">{fim.toLocaleDateString('pt-BR')}</td>
@@ -882,7 +882,7 @@ export default function Cronograma() {
           {abaAtiva === 'curvaS' && (
             <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
               <h3 className="font-bold text-gray-800 mb-4">Curva S — Avanço Físico-Financeiro Acumulado</h3>
-              <CurvaS atividades={atividades} totalSemanas={totalSemanas} />
+              <CurvaS atividades={atividades} totalDias={totalDias} />
               <p className="text-xs text-gray-400 mt-3 text-center">
                 Avanço físico previsto (%) × Semanas de obra
               </p>
