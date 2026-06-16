@@ -969,7 +969,15 @@ export default function Cronograma() {
       })
       if (!changed) break
     }
-    return result
+    // Atualiza datas das etapas-mãe com base nos filhos
+    return result.map(a => {
+      if (!a.nome.startsWith('▸')) return a
+      const filhos = result.filter(f => f.etapa === a.etapa && !f.nome.startsWith('▸') && !f.marco)
+      if (filhos.length === 0) return a
+      const ini = Math.min(...filhos.map(f => f.inicioDia))
+      const fim = Math.max(...filhos.map(f => f.fimDia))
+      return { ...a, inicioDia: ini, fimDia: fim, duracaoDias: fim - ini + 1 }
+    })
   }
 
   function updateAtividade(id: string, campo: 'duracaoDias' | 'predecessoras' | 'recursos', valor: string) {
