@@ -927,15 +927,56 @@ export default function Cronograma() {
     atividades.length ? Math.max(...atividades.map(a => a.fimDia)) : 0
   , [atividades])
 
-  function updateAtividade(id: string, campo: 'duracaoDias' | 'predecessoras' | 'recursos', valor: string) {
-    setAtividades(prev => prev.map(a => {
-      if (a.id !== id) return a
-      if (campo === 'duracaoDias') {
-        const dur = Math.max(1, parseInt(valor) || 1)
-        return { ...a, duracaoDias: dur, fimDia: a.inicioDia + dur - 1 }
+  // Calcula o inicioDia de uma atividade com base em suas predecessoras
+  // TI (padrão): "3"   → inicia após o fim da atividade 3
+  // II          : "3II" → inicia junto com o início da atividade 3
+  function calcularInicioPorPredecessoras(pred: string, arr: Atividade[]): number {
+    const partes = pred.split(/[,;]/).map(p => p.trim()).filter(Boolean)
+    let maxInicio = 1
+    for (const parte of partes) {
+      const mII = parte.match(/^(\d+)\s*II$/i)
+      const mTI = parte.match(/^(\d+)$/)
+      if (mII) {
+        const dep = arr.find(a => a.id === mII[1])
+        if (dep) maxInicio = Math.max(maxInicio, dep.inicioDia)
+      } else if (mTI) {
+        const dep = arr.find(a => a.id === mTI[1])
+        if (dep) maxInicio = Math.max(maxInicio, dep.fimDia + 1)
       }
-      return { ...a, [campo]: valor }
-    }))
+    }
+    return maxInicio
+  }
+
+  // Propaga datas em cascata (até 8 passes para cobrir cadeias longas)
+  function recalcularDatas(arr: Atividade[]): Atividade[] {
+    let result = arr.map(a => ({ ...a }))
+    for (let pass = 0; pass < 8; pass++) {
+      let changed = false
+      result = result.map(a => {
+        if (!a.predecessoras.trim()) return a
+        const novoInicio = calcularInicioPorPredecessoras(a.predecessoras, result)
+        if (novoInicio === a.inicioDia) return a
+        changed = true
+        return { ...a, inicioDia: novoInicio, fimDia: novoInicio + a.duracaoDias - 1 }
+      })
+      if (!changed) break
+    }
+    return result
+  }
+
+  function updateAtividade(id: string, campo: 'duracaoDias' | 'predecessoras' | 'recursos', valor: string) {
+    setAtividades(prev => {
+      const base = prev.map(a => {
+        if (a.id !== id) return a
+        if (campo === 'duracaoDias') {
+          const dur = Math.max(1, parseInt(valor) || 1)
+          return { ...a, duracaoDias: dur, fimDia: a.inicioDia + dur - 1 }
+        }
+        return { ...a, [campo]: valor }
+      })
+      // Recalcula datas em cascata quando duração ou predecessoras mudam
+      return campo === 'recursos' ? base : recalcularDatas(base)
+    })
   }
 
   async function handleFile(file: File) {
@@ -1175,7 +1216,11 @@ export default function Cronograma() {
                   <thead className="bg-gray-50 border-b border-gray-200">
                     <tr>
                       {['', 'ID', 'EAP', 'Atividade', 'Etapa', 'Dur.', 'Início', 'Fim', 'Pred.', 'Recursos', 'Peso%', ...(valorVenda > 0 ? ['Valor (R$)'] : []), 'Acum%', 'CC'].map(h => (
-                        <th key={h} className="px-3 py-2 text-left font-semibold text-gray-600 whitespace-nowrap">{h}</th>
+                        <th key={h} className="px-3 py-2 text-left font-semibold text-gray-600 whitespace-nowrap">
+                          {h === 'Pred.' ? (
+                            <>Pred. <span className="text-[9px] font-normal text-gray-400">(3=TI · 3II=II)</span></>
+                          ) : h}
+                        </th>
                       ))}
                     </tr>
                   </thead>
@@ -1273,8 +1318,9 @@ export default function Cronograma() {
                             <input
                               type="text" value={a.predecessoras}
                               onChange={e => updateAtividade(a.id, 'predecessoras', e.target.value)}
-                              placeholder="—"
-                              className="w-16 border border-gray-200 rounded px-1 py-0.5 text-center focus:outline-none focus:border-blue-400 bg-transparent"
+                              placeholder="Ex: 3 ou 3II"
+                              title="TI: só o número (término→início) | II: número + II (início→início)"
+                              className="w-20 border border-gray-200 rounded px-1 py-0.5 text-center focus:outline-none focus:border-blue-400 bg-transparent"
                             />
                           </td>
                           <td className="px-3 py-1.5">
