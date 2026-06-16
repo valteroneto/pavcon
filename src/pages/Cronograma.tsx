@@ -572,21 +572,65 @@ export default function Cronograma() {
   const [abaAtiva, setAbaAtiva] = useState<'gantt' | 'tabela' | 'curvaS' | 'riscos'>('gantt')
   const [dragId, setDragId] = useState<string | null>(null)
   const [dragOverId, setDragOverId] = useState<string | null>(null)
+  const [editingEtapaId, setEditingEtapaId] = useState<string | null>(null)
+  const [editingEtapaNome, setEditingEtapaNome] = useState('')
 
-  function moverParaEtapa(servicoId: string, novaEtapa: string) {
-    setAtividades(prev => prev.map(a => a.id === servicoId ? { ...a, etapa: novaEtapa } : a))
+  function recalcularEAP(arr: Atividade[]): Atividade[] {
+    let etapaIdx = 0
+    const etapaNumero: Record<string, number> = {}
+    const childCount: Record<string, number> = {}
+    return arr.map(a => {
+      if (a.nome.startsWith('▸')) {
+        etapaIdx++
+        etapaNumero[a.etapa] = etapaIdx
+        childCount[a.etapa] = 0
+        return { ...a, eap: String(etapaIdx) }
+      } else {
+        const pNum = etapaNumero[a.etapa] ?? etapaIdx
+        childCount[a.etapa] = (childCount[a.etapa] ?? 0) + 1
+        return { ...a, eap: `${pNum}.${childCount[a.etapa]}` }
+      }
+    })
   }
 
-  function reordenarAtividades(draggedId: string, targetId: string) {
+  function moverParaEtapa(servicoId: string, novaEtapa: string) {
+    setAtividades(prev => recalcularEAP(
+      prev.map(a => a.id === servicoId ? { ...a, etapa: novaEtapa } : a)
+    ))
+  }
+
+  function reordenarAtividades(draggedId: string, targetId: string, novaEtapa?: string) {
     setAtividades(prev => {
       const arr = [...prev]
       const fromIdx = arr.findIndex(a => a.id === draggedId)
       const toIdx = arr.findIndex(a => a.id === targetId)
       if (fromIdx === -1 || toIdx === -1 || fromIdx === toIdx) return prev
       const [item] = arr.splice(fromIdx, 1)
+      if (novaEtapa) item.etapa = novaEtapa
       arr.splice(toIdx, 0, item)
-      return arr
+      return recalcularEAP(arr)
     })
+  }
+
+  function renomearEtapa(id: string, novoNome: string) {
+    const nome = novoNome.trim()
+    if (!nome) return
+    setAtividades(prev => {
+      const mae = prev.find(a => a.id === id)
+      if (!mae) return prev
+      const antigaEtapa = mae.etapa
+      return recalcularEAP(prev.map(a => {
+        if (a.etapa === antigaEtapa) {
+          return {
+            ...a,
+            etapa: nome,
+            nome: a.nome.startsWith('▸') ? `▸ ${nome}` : a.nome,
+          }
+        }
+        return a
+      }))
+    })
+    setEditingEtapaId(null)
   }
 
   const totalDias = useMemo(() =>
@@ -851,8 +895,7 @@ export default function Cronograma() {
                           onDrop={e => {
                             e.preventDefault()
                             if (dragId && dragId !== a.id) {
-                              reordenarAtividades(dragId, a.id)
-                              if (!isMae) moverParaEtapa(dragId, a.etapa)
+                              reordenarAtividades(dragId, a.id, a.etapa)
                             }
                             setDragId(null); setDragOverId(null)
                           }}
@@ -866,8 +909,33 @@ export default function Cronograma() {
                           <td className="px-3 py-1.5 text-gray-300 select-none">{!isMae ? '⠿' : ''}</td>
                           <td className="px-3 py-1.5">{a.id}</td>
                           <td className="px-3 py-1.5 font-mono">{a.eap}</td>
-                          <td className="px-3 py-1.5 max-w-[180px] truncate" style={{ paddingLeft: isMae ? 12 : 24 }}>
-                            <span style={{ color: isMae ? corEtapa(a.etapa) : undefined }}>{a.nome.replace('▸ ', '')}</span>
+                          <td className="px-3 py-1.5 max-w-[200px]" style={{ paddingLeft: isMae ? 12 : 24 }}>
+                            {isMae && editingEtapaId === a.id ? (
+                              <input
+                                autoFocus
+                                value={editingEtapaNome}
+                                onChange={e => setEditingEtapaNome(e.target.value)}
+                                onBlur={() => renomearEtapa(a.id, editingEtapaNome)}
+                                onKeyDown={e => {
+                                  if (e.key === 'Enter') renomearEtapa(a.id, editingEtapaNome)
+                                  if (e.key === 'Escape') setEditingEtapaId(null)
+                                }}
+                                className="w-full border border-blue-400 rounded px-1 py-0.5 text-xs font-bold focus:outline-none"
+                                style={{ color: corEtapa(a.etapa) }}
+                              />
+                            ) : (
+                              <span
+                                style={{ color: isMae ? corEtapa(a.etapa) : undefined }}
+                                title={isMae ? 'Duplo clique para renomear' : undefined}
+                                onDoubleClick={isMae ? () => {
+                                  setEditingEtapaId(a.id)
+                                  setEditingEtapaNome(a.etapa)
+                                } : undefined}
+                                className={isMae ? 'cursor-text truncate block' : 'truncate block'}
+                              >
+                                {a.nome.replace('▸ ', '')}
+                              </span>
+                            )}
                           </td>
                           <td className="px-3 py-1.5">
                             {isMae ? (
