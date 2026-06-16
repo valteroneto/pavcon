@@ -1,9 +1,9 @@
-import { useState, useRef, useMemo, useEffect } from 'react'
+import { useState, useRef, useMemo, useEffect, useCallback } from 'react'
 import * as XLSX from 'xlsx'
 import * as pdfjsLib from 'pdfjs-dist'
 import {
   Upload, FileSpreadsheet, Calendar, TrendingUp, Download,
-  ChevronRight, AlertCircle, CheckCircle2, Clock, Layers, FileText, Pencil
+  ChevronRight, AlertCircle, CheckCircle2, Clock, Layers, FileText, Pencil, Plus
 } from 'lucide-react'
 
 // Worker local via import.meta.url — CDN não tem v6.0.227
@@ -901,6 +901,53 @@ export default function Cronograma() {
     setEditingNomeId(null)
   }
 
+  const nextId = useCallback((prev: Atividade[]) =>
+    String(Math.max(0, ...prev.map(a => parseInt(a.id) || 0)) + 1)
+  , [])
+
+  function adicionarAtividade() {
+    setAtividades(prev => {
+      const id = nextId(prev)
+      const ultimaFim = prev.length ? Math.max(...prev.map(a => a.fimDia)) : 0
+      const novaAtividade: Atividade = {
+        id, eap: id,
+        nome: '▸ Nova Atividade',
+        etapa: 'Outros Serviços',
+        duracaoDias: 5, inicioDia: ultimaFim + 1, fimDia: ultimaFim + 5,
+        predecessoras: '', recursos: '', peso: 0, pesoCumulativo: 0,
+        caminhoCritico: false, marco: false,
+      }
+      return recalcularEAP([...prev, novaAtividade])
+    })
+  }
+
+  function adicionarServico(atividadeId: string) {
+    setAtividades(prev => {
+      const mae = prev.find(a => a.id === atividadeId)
+      if (!mae) return prev
+      const id = nextId(prev)
+      const irmaos = prev.filter(a => a.etapa === mae.etapa && !a.nome.startsWith('▸') && !a.marco)
+      const inicioServico = irmaos.length
+        ? Math.max(...irmaos.map(a => a.fimDia)) + 1
+        : mae.inicioDia
+      const novoServico: Atividade = {
+        id, eap: '',
+        nome: 'Novo Serviço',
+        etapa: mae.etapa,
+        duracaoDias: 5, inicioDia: inicioServico, fimDia: inicioServico + 4,
+        predecessoras: '', recursos: '', peso: 0, pesoCumulativo: 0,
+        caminhoCritico: false, marco: false,
+      }
+      // Insere logo após a última linha da atividade
+      const maeIdx = prev.findIndex(a => a.id === atividadeId)
+      const filhosIdxs = prev.map((a, i) => a.etapa === mae.etapa && !a.nome.startsWith('▸') ? i : -1).filter(i => i > maeIdx)
+      const insertAt = filhosIdxs.length ? Math.max(...filhosIdxs) + 1 : maeIdx + 1
+      const arr = [...prev]
+      arr.splice(insertAt, 0, novoServico)
+      return recalcularEAP(arr)
+    })
+  }
+
   function recalcularEAP(arr: Atividade[]): Atividade[] {
     let etapaIdx = 0
     const etapaNumero: Record<string, number> = {}
@@ -1226,6 +1273,12 @@ export default function Cronograma() {
             </div>
             <div className="flex gap-2">
               <button
+                onClick={adicionarAtividade}
+                className="flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-800 px-3 py-1.5 border border-blue-200 hover:border-blue-400 rounded-lg transition-colors"
+              >
+                <Plus size={14} /> Atividade
+              </button>
+              <button
                 onClick={() => { setStep('idle'); setAtividades([]); setResumo(null); localStorage.removeItem(STORAGE_KEY) }}
                 className="text-sm text-gray-500 hover:text-gray-700 px-3 py-1.5 border border-gray-200 rounded-lg"
               >
@@ -1328,7 +1381,17 @@ export default function Cronograma() {
                             !isMae ? 'cursor-grab' : '',
                           ].join(' ')}
                         >
-                          <td className="px-3 py-1.5 text-gray-300 select-none">{!isMae ? '⠿' : ''}</td>
+                          <td className="px-1 py-1.5 text-gray-300 select-none">
+                            {isMae ? (
+                              <button
+                                onClick={() => adicionarServico(a.id)}
+                                title="Adicionar serviço nesta atividade"
+                                className="text-gray-300 hover:text-blue-500 transition-colors"
+                              >
+                                <Plus size={13} />
+                              </button>
+                            ) : '⠿'}
+                          </td>
                           <td className="px-3 py-1.5">{a.id}</td>
                           <td className="px-3 py-1.5 font-mono">{a.eap}</td>
                           <td className="px-3 py-1.5 overflow-hidden" style={{ paddingLeft: isMae ? 12 : 24, width: colAtividadeW, maxWidth: colAtividadeW }}>
