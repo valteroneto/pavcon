@@ -3,7 +3,7 @@ import * as XLSX from 'xlsx'
 import * as pdfjsLib from 'pdfjs-dist'
 import {
   Upload, FileSpreadsheet, Calendar, TrendingUp, Download,
-  ChevronRight, AlertCircle, CheckCircle2, Clock, Layers, FileText
+  ChevronRight, AlertCircle, CheckCircle2, Clock, Layers, FileText, Pencil
 } from 'lucide-react'
 
 // Worker local via import.meta.url — CDN não tem v6.0.227
@@ -1313,21 +1313,28 @@ export default function Cronograma() {
                                 className="w-full border border-blue-400 rounded px-1 py-0.5 text-xs focus:outline-none"
                               />
                             ) : (
-                              <span
-                                style={{ color: isMae ? corEtapa(a.etapa) : undefined }}
-                                title="Duplo clique para renomear"
-                                onDoubleClick={() => {
-                                  if (isMae) {
-                                    setEditingEtapaId(a.id)
-                                    setEditingEtapaNome(a.etapa)
-                                  } else {
-                                    setEditingNomeId(a.id)
-                                    setEditingNomeValor(a.nome)
-                                  }
-                                }}
-                                className="cursor-text truncate block"
-                              >
-                                {a.nome.replace('▸ ', '')}
+                              <span className="flex items-center gap-1 group min-w-0">
+                                <span
+                                  style={{ color: isMae ? corEtapa(a.etapa) : undefined }}
+                                  className="truncate"
+                                >
+                                  {a.nome.replace('▸ ', '')}
+                                </span>
+                                <button
+                                  title="Renomear"
+                                  onClick={() => {
+                                    if (isMae) {
+                                      setEditingEtapaId(a.id)
+                                      setEditingEtapaNome(a.etapa)
+                                    } else {
+                                      setEditingNomeId(a.id)
+                                      setEditingNomeValor(a.nome)
+                                    }
+                                  }}
+                                  className="opacity-0 group-hover:opacity-100 flex-shrink-0 text-gray-400 hover:text-blue-500 transition-opacity"
+                                >
+                                  <Pencil size={11} />
+                                </button>
                               </span>
                             )}
                           </td>
