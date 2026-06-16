@@ -878,6 +878,10 @@ export default function Cronograma() {
   const [editingEtapaNome, setEditingEtapaNome] = useState('')
   const [editingNomeId, setEditingNomeId] = useState<string | null>(null)
   const [editingNomeValor, setEditingNomeValor] = useState('')
+  const [colAtividadeW, setColAtividadeW] = useState(200)
+  const resizingRef = useRef(false)
+  const resizeStartX = useRef(0)
+  const resizeStartW = useRef(0)
 
   function renomearAtividade(id: string, novoNome: string) {
     const nome = novoNome.trim()
@@ -1244,10 +1248,39 @@ export default function Cronograma() {
                   <thead className="bg-gray-50 border-b border-gray-200">
                     <tr>
                       {['', 'ID', 'EAP', 'Atividade', 'Etapa', 'Dur.', 'Início', 'Fim', 'Pred.', 'Recursos', 'Peso%', ...(valorVenda > 0 ? ['Valor (R$)'] : []), 'Acum%', 'CC'].map(h => (
-                        <th key={h} className="px-3 py-2 text-left font-semibold text-gray-600 whitespace-nowrap">
+                        <th
+                          key={h}
+                          className="px-3 py-2 text-left font-semibold text-gray-600 whitespace-nowrap relative"
+                          style={h === 'Atividade' ? { width: colAtividadeW, minWidth: colAtividadeW } : undefined}
+                        >
                           {h === 'Pred.' ? (
                             <>Pred. <span className="text-[9px] font-normal text-gray-400">(3=TI · 3II=II)</span></>
                           ) : h}
+                          {h === 'Atividade' && (
+                            <span
+                              onMouseDown={e => {
+                                resizingRef.current = true
+                                resizeStartX.current = e.clientX
+                                resizeStartW.current = colAtividadeW
+                                const onMove = (ev: MouseEvent) => {
+                                  if (!resizingRef.current) return
+                                  const delta = ev.clientX - resizeStartX.current
+                                  setColAtividadeW(Math.max(120, resizeStartW.current + delta))
+                                }
+                                const onUp = () => {
+                                  resizingRef.current = false
+                                  window.removeEventListener('mousemove', onMove)
+                                  window.removeEventListener('mouseup', onUp)
+                                }
+                                window.addEventListener('mousemove', onMove)
+                                window.addEventListener('mouseup', onUp)
+                              }}
+                              className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize flex items-center justify-center group"
+                              title="Arrastar para redimensionar"
+                            >
+                              <span className="w-0.5 h-4 bg-gray-300 group-hover:bg-blue-400 rounded transition-colors" />
+                            </span>
+                          )}
                         </th>
                       ))}
                     </tr>
@@ -1286,7 +1319,7 @@ export default function Cronograma() {
                           <td className="px-3 py-1.5 text-gray-300 select-none">{!isMae ? '⠿' : ''}</td>
                           <td className="px-3 py-1.5">{a.id}</td>
                           <td className="px-3 py-1.5 font-mono">{a.eap}</td>
-                          <td className="px-3 py-1.5 max-w-[200px]" style={{ paddingLeft: isMae ? 12 : 24 }}>
+                          <td className="px-3 py-1.5 overflow-hidden" style={{ paddingLeft: isMae ? 12 : 24, width: colAtividadeW, maxWidth: colAtividadeW }}>
                             {isMae && editingEtapaId === a.id ? (
                               <input
                                 autoFocus
