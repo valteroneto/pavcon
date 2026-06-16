@@ -424,14 +424,14 @@ function gerarCronograma(servicos: ServicoOrcamento[], dataInicio: string): { at
 
 // ─── Exportar Excel ───────────────────────────────────────────────────────────
 
-function exportarExcel(atividades: Atividade[], dataInicio: string) {
+function exportarExcel(atividades: Atividade[], dataInicio: string, valorVenda: number) {
   const inicio = new Date(dataInicio)
   const rows = atividades.map(a => {
     const di = new Date(inicio)
     di.setDate(di.getDate() + (a.inicioDia - 1))
     const df = new Date(inicio)
     df.setDate(df.getDate() + (a.fimDia - 1))
-    return {
+    const row: Record<string, unknown> = {
       'ID': a.id,
       'EAP': a.eap,
       'Atividade': a.nome.replace('▸ ', ''),
@@ -445,6 +445,11 @@ function exportarExcel(atividades: Atividade[], dataInicio: string) {
       'Peso Acum. (%)': a.pesoCumulativo.toFixed(2),
       'Caminho Crítico': a.caminhoCritico ? 'Sim' : 'Não',
     }
+    if (valorVenda > 0) {
+      row['Valor Venda (R$)'] = (a.peso / 100 * valorVenda).toFixed(2)
+      row['Valor Acum. (R$)'] = (a.pesoCumulativo / 100 * valorVenda).toFixed(2)
+    }
+    return row
   })
   const ws = XLSX.utils.json_to_sheet(rows)
   const wb = XLSX.utils.book_new()
@@ -515,10 +520,16 @@ function GanttChart({ atividades, totalDias }: { atividades: Atividade[]; totalD
 
 // ─── Curva S ──────────────────────────────────────────────────────────────────
 
-function CurvaS({ atividades, totalDias }: { atividades: Atividade[]; totalDias: number }) {
+function fmtBRL(v: number): string {
+  if (v >= 1_000_000) return `R$${(v / 1_000_000).toFixed(1)}M`
+  if (v >= 1_000) return `R$${(v / 1_000).toFixed(0)}k`
+  return `R$${v.toFixed(0)}`
+}
+
+function CurvaS({ atividades, totalDias, valorVenda }: { atividades: Atividade[]; totalDias: number; valorVenda: number }) {
   const pontos = useMemo(() => {
-    const semanas = Math.min(totalDias, 120)
-    return Array.from({ length: semanas + 1 }, (_, s) => {
+    const dias = Math.min(totalDias, 120)
+    return Array.from({ length: dias + 1 }, (_, s) => {
       const acum = atividades
         .filter(a => !a.nome.startsWith('▸') && !a.marco && a.fimDia <= s)
         .reduce((sum, a) => sum + a.peso, 0)
@@ -526,35 +537,69 @@ function CurvaS({ atividades, totalDias }: { atividades: Atividade[]; totalDias:
     })
   }, [atividades, totalDias])
 
-  const W = 600, H = 200
-  const padL = 40, padB = 30, padR = 20, padT = 10
+  const W = 600, H = 220
+  const padL = 46, padB = 30, padR = valorVenda > 0 ? 72 : 20, padT = 10
 
-  const toX = (i: number) => padL + (i / (pontos.length - 1)) * (W - padL - padR)
+  const toX = (i: number) => padL + (i / Math.max(1, pontos.length - 1)) * (W - padL - padR)
   const toY = (v: number) => padT + (1 - v / 100) * (H - padT - padB)
 
   const path = pontos.map((v, i) => `${i === 0 ? 'M' : 'L'}${toX(i)},${toY(v)}`).join(' ')
   const area = `${path} L${toX(pontos.length - 1)},${toY(0)} L${toX(0)},${toY(0)} Z`
 
+  const gridPcts = [0, 25, 50, 75, 100]
+
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ maxHeight: 220 }}>
-      {/* Grid */}
-      {[0, 25, 50, 75, 100].map(v => (
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ maxHeight: 240 }}>
+      {/* Grid + eixo esquerdo (%) */}
+      {gridPcts.map(v => (
         <g key={v}>
           <line x1={padL} y1={toY(v)} x2={W - padR} y2={toY(v)} stroke="#e5e7eb" strokeWidth={1} />
           <text x={padL - 4} y={toY(v) + 4} textAnchor="end" fontSize={9} fill="#9ca3af">{v}%</text>
         </g>
       ))}
+
+      {/* Eixo direito (R$) */}
+      {valorVenda > 0 && gridPcts.map(v => (
+        <text key={v} x={W - padR + 4} y={toY(v) + 4} textAnchor="start" fontSize={8} fill="#059669">
+          {fmtBRL(v / 100 * valorVenda)}
+        </text>
+      ))}
+
       {/* Área */}
       <path d={area} fill="#3b82f620" />
-      {/* Linha */}
+      {/* Linha física (%) */}
       <path d={path} fill="none" stroke="#2563eb" strokeWidth={2} />
+      {/* Linha financeira (R$) — mesma curva, cor verde, se valorVenda informado */}
+      {valorVenda > 0 && (
+        <path d={path} fill="none" stroke="#059669" strokeWidth={1.5} strokeDasharray="5,3" opacity={0.7} />
+      )}
       {/* Pontos */}
-      {pontos.filter((_, i) => i % Math.ceil(pontos.length / 10) === 0).map((v, i, arr) => {
-        const origIdx = i * Math.ceil(pontos.length / 10)
-        return <circle key={i} cx={toX(origIdx)} cy={toY(v)} r={3} fill="#2563eb" />
+      {pontos.filter((_, i) => i % Math.ceil(Math.max(1, pontos.length) / 10) === 0).map((v, i) => {
+        const origIdx = i * Math.ceil(Math.max(1, pontos.length) / 10)
+        return (
+          <g key={i}>
+            <circle cx={toX(origIdx)} cy={toY(v)} r={3} fill="#2563eb" />
+            {valorVenda > 0 && origIdx % Math.ceil(Math.max(1, pontos.length) / 5) === 0 && (
+              <text x={toX(origIdx)} y={toY(v) - 6} textAnchor="middle" fontSize={8} fill="#059669">
+                {fmtBRL(v / 100 * valorVenda)}
+              </text>
+            )}
+          </g>
+        )
       })}
+      {/* Legenda */}
+      <g>
+        <circle cx={padL + 8} cy={H - 8} r={3} fill="#2563eb" />
+        <text x={padL + 14} y={H - 5} fontSize={8} fill="#2563eb">Físico (%)</text>
+        {valorVenda > 0 && (
+          <>
+            <line x1={padL + 70} y1={H - 8} x2={padL + 82} y2={H - 8} stroke="#059669" strokeWidth={1.5} strokeDasharray="4,2" />
+            <text x={padL + 86} y={H - 5} fontSize={8} fill="#059669">Financeiro (R$)</text>
+          </>
+        )}
+      </g>
       {/* Eixo X label */}
-      <text x={W / 2} y={H - 2} textAnchor="middle" fontSize={9} fill="#6b7280">Dias</text>
+      <text x={W / 2} y={H - 1} textAnchor="middle" fontSize={9} fill="#6b7280">Dias</text>
     </svg>
   )
 }
@@ -567,6 +612,7 @@ export default function Cronograma() {
   const [erro, setErro] = useState('')
   const [fileName, setFileName] = useState('')
   const [dataInicio, setDataInicio] = useState(() => new Date().toISOString().slice(0, 10))
+  const [valorVenda, setValorVenda] = useState(0)
   const [atividades, setAtividades] = useState<Atividade[]>([])
   const [resumo, setResumo] = useState<Resumo | null>(null)
   const [abaAtiva, setAbaAtiva] = useState<'gantt' | 'tabela' | 'curvaS' | 'riscos'>('gantt')
@@ -715,15 +761,28 @@ export default function Cronograma() {
 
       {step === 'idle' && (
         <div className="max-w-2xl space-y-4">
-          {/* Data de início */}
-          <div className="bg-white rounded-2xl border border-gray-200 p-5">
-            <label className="block text-sm font-semibold text-gray-700 mb-2">Data de Início da Obra</label>
-            <input
-              type="date"
-              value={dataInicio}
-              onChange={e => setDataInicio(e.target.value)}
-              className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400"
-            />
+          {/* Data de início + Valor de Venda */}
+          <div className="bg-white rounded-2xl border border-gray-200 p-5 flex flex-wrap gap-6">
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-2">Data de Início da Obra</label>
+              <input
+                type="date"
+                value={dataInicio}
+                onChange={e => setDataInicio(e.target.value)}
+                className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-2">Valor de Venda (R$)</label>
+              <input
+                type="number" min={0} step={1000}
+                value={valorVenda || ''}
+                onChange={e => setValorVenda(parseFloat(e.target.value) || 0)}
+                placeholder="Ex: 1500000"
+                className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400 w-48"
+              />
+              <p className="text-[10px] text-gray-400 mt-1">Para o cronograma físico-financeiro</p>
+            </div>
           </div>
 
           {/* Upload */}
@@ -804,7 +863,7 @@ export default function Cronograma() {
             {[
               { label: 'Prazo Total', value: `${resumo.prazoTotal} dias`, sub: `≈ ${Math.round(resumo.prazoTotal / 30)} meses`, icon: Clock, cor: '#2563eb' },
               { label: 'Atividades', value: resumo.totalAtividades, sub: `em ${resumo.etapas.length} etapas`, icon: Layers, cor: '#059669' },
-              { label: 'Etapas', value: resumo.etapas.length, sub: 'identificadas', icon: ChevronRight, cor: '#d97706' },
+              { label: 'Valor de Venda', value: valorVenda > 0 ? fmtBRL(valorVenda) : '—', sub: valorVenda > 0 ? 'orçamento de venda' : 'não informado', icon: TrendingUp, cor: '#059669' },
               { label: 'Caminho Crítico', value: `${resumo.caminhoCritico.length} etapas`, sub: resumo.caminhoCritico.slice(0, 2).join(' → '), icon: TrendingUp, cor: '#dc2626' },
             ].map(({ label, value, sub, icon: Icon, cor }) => (
               <div key={label} className="bg-white rounded-2xl border border-gray-200 p-4 shadow-sm">
@@ -843,7 +902,7 @@ export default function Cronograma() {
                 Novo orçamento
               </button>
               <button
-                onClick={() => exportarExcel(atividades, dataInicio)}
+                onClick={() => exportarExcel(atividades, dataInicio, valorVenda)}
                 className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold px-4 py-1.5 rounded-xl transition-colors"
               >
                 <Download size={14} /> Excel
@@ -870,7 +929,7 @@ export default function Cronograma() {
                 <table className="w-full text-xs">
                   <thead className="bg-gray-50 border-b border-gray-200">
                     <tr>
-                      {['', 'ID', 'EAP', 'Atividade', 'Etapa', 'Dur.', 'Início', 'Fim', 'Pred.', 'Recursos', 'Peso%', 'Acum%', 'CC'].map(h => (
+                      {['', 'ID', 'EAP', 'Atividade', 'Etapa', 'Dur.', 'Início', 'Fim', 'Pred.', 'Recursos', 'Peso%', ...(valorVenda > 0 ? ['Valor (R$)'] : []), 'Acum%', 'CC'].map(h => (
                         <th key={h} className="px-3 py-2 text-left font-semibold text-gray-600 whitespace-nowrap">{h}</th>
                       ))}
                     </tr>
@@ -982,6 +1041,11 @@ export default function Cronograma() {
                             />
                           </td>
                           <td className="px-3 py-1.5">{a.peso.toFixed(1)}%</td>
+                          {valorVenda > 0 && (
+                            <td className="px-3 py-1.5 whitespace-nowrap font-medium text-green-700">
+                              {(a.peso / 100 * valorVenda).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })}
+                            </td>
+                          )}
                           <td className="px-3 py-1.5">
                             <div className="flex items-center gap-1">
                               <div className="flex-1 bg-gray-100 rounded-full h-1.5" style={{ minWidth: 40 }}>
@@ -1006,7 +1070,7 @@ export default function Cronograma() {
           {abaAtiva === 'curvaS' && (
             <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
               <h3 className="font-bold text-gray-800 mb-4">Curva S — Avanço Físico-Financeiro Acumulado</h3>
-              <CurvaS atividades={atividades} totalDias={totalDias} />
+              <CurvaS atividades={atividades} totalDias={totalDias} valorVenda={valorVenda} />
               <p className="text-xs text-gray-400 mt-3 text-center">
                 Avanço físico previsto (%) × Semanas de obra
               </p>
