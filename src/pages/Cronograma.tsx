@@ -575,14 +575,14 @@ export default function Cronograma() {
     atividades.length ? Math.max(...atividades.map(a => a.fimSemana)) : 0
   , [atividades])
 
-  function updateAtividade(id: string, campo: 'duracaoSemanas' | 'predecessoras', valor: string) {
+  function updateAtividade(id: string, campo: 'duracaoSemanas' | 'predecessoras' | 'recursos', valor: string) {
     setAtividades(prev => prev.map(a => {
       if (a.id !== id) return a
       if (campo === 'duracaoSemanas') {
         const dur = Math.max(1, parseInt(valor) || 1)
         return { ...a, duracaoSemanas: dur, fimSemana: a.inicioSemana + dur - 1 }
       }
-      return { ...a, predecessoras: valor }
+      return { ...a, [campo]: valor }
     }))
   }
 
@@ -849,7 +849,14 @@ export default function Cronograma() {
                               className="w-16 border border-gray-200 rounded px-1 py-0.5 text-center focus:outline-none focus:border-blue-400 bg-transparent"
                             />
                           </td>
-                          <td className="px-3 py-1.5 max-w-[100px] truncate">{a.recursos}</td>
+                          <td className="px-3 py-1.5">
+                            <input
+                              type="text" value={a.recursos}
+                              onChange={e => updateAtividade(a.id, 'recursos', e.target.value)}
+                              placeholder="—"
+                              className="w-28 border border-gray-200 rounded px-1 py-0.5 focus:outline-none focus:border-blue-400 bg-transparent text-xs"
+                            />
+                          </td>
                           <td className="px-3 py-1.5">{a.peso.toFixed(1)}%</td>
                           <td className="px-3 py-1.5">
                             <div className="flex items-center gap-1">
