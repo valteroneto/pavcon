@@ -1212,6 +1212,7 @@ export default function Cronograma() {
   const [erro, setErro] = useState('')
   const [fileName, setFileName] = useState(() => loadStorage()?.fileName ?? '')
   const [dataInicio, setDataInicio] = useState(() => loadStorage()?.dataInicio ?? new Date().toISOString().slice(0, 10))
+  const [dataLimite, setDataLimite] = useState<string>(() => loadStorage()?.dataLimite ?? '')
   const [valorVenda, setValorVenda] = useState<number>(() => loadStorage()?.valorVenda ?? 0)
   const [atividades, setAtividades] = useState<Atividade[]>(() =>
     (loadStorage()?.atividades ?? []).map((a: Atividade) => ({ ...a, agendamento: a.agendamento ?? 'auto' as const }))
@@ -1226,7 +1227,7 @@ export default function Cronograma() {
   // Persiste no localStorage sempre que o estado relevante muda
   useEffect(() => {
     if (step === 'analisando') return
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ step, fileName, dataInicio, valorVenda, atividades, resumo, abaAtiva, fontePDF }))
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ step, fileName, dataInicio, dataLimite, valorVenda, atividades, resumo, abaAtiva, fontePDF }))
   }, [step, fileName, dataInicio, valorVenda, atividades, resumo, abaAtiva])
 
   useEffect(() => {
@@ -1257,7 +1258,7 @@ export default function Cronograma() {
     if (!nomeNuvem.trim()) return setNuvemErro('Digite um nome para o cronograma.')
     if (!resumo) return setNuvemErro('Não há cronograma para salvar.')
     setNuvemLoading(true); setNuvemErro(''); setNuvemSucesso('')
-    const dados = JSON.stringify({ step, fileName, dataInicio, valorVenda, atividades, resumo, abaAtiva, fontePDF })
+    const dados = JSON.stringify({ step, fileName, dataInicio, dataLimite, valorVenda, atividades, resumo, abaAtiva, fontePDF })
     const { error } = await supabase.from('cronogramas').insert({
       nome: nomeNuvem.trim(),
       usuario_id: user?.id ?? 'anonimo',
@@ -1287,6 +1288,7 @@ export default function Cronograma() {
       if (s.atividades) setAtividades(s.atividades.map((a: Atividade) => ({ ...a, agendamento: a.agendamento ?? 'auto' as const })))
       if (s.resumo) setResumo(s.resumo)
       if (s.dataInicio) setDataInicio(s.dataInicio)
+      if (s.dataLimite !== undefined) setDataLimite(s.dataLimite)
       if (s.valorVenda) setValorVenda(s.valorVenda)
       if (s.fontePDF !== undefined) setFontePDF(s.fontePDF)
       setStep('resultado')
@@ -1631,7 +1633,7 @@ export default function Cronograma() {
 
       {step === 'idle' && (
         <div className="max-w-2xl space-y-4">
-          {/* Data de início + Valor de Venda */}
+          {/* Data de início + Data Limite + Valor de Venda */}
           <div className="bg-white rounded-2xl border border-gray-200 p-5 flex flex-wrap gap-6">
             <div>
               <label className="block text-sm font-semibold text-gray-700 mb-2">Data de Início da Obra</label>
@@ -1641,6 +1643,19 @@ export default function Cronograma() {
                 onChange={e => setDataInicio(e.target.value)}
                 className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400"
               />
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-2 flex items-center gap-1">
+                Data Limite de Entrega
+                <span className="text-[10px] font-normal text-gray-400">(opcional)</span>
+              </label>
+              <input
+                type="date"
+                value={dataLimite}
+                onChange={e => setDataLimite(e.target.value)}
+                className="border border-orange-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-500"
+              />
+              <p className="text-[10px] text-gray-400 mt-1">Prazo contratual de entrega</p>
             </div>
             <div>
               <label className="block text-sm font-semibold text-gray-700 mb-2">Valor de Venda (R$)</label>
@@ -1798,6 +1813,32 @@ export default function Cronograma() {
               </div>
             ))}
           </div>
+
+          {/* Alerta data limite */}
+          {dataLimite && (() => {
+            const dtInicio = new Date(dataInicio + 'T00:00:00')
+            const dtLimite = new Date(dataLimite + 'T00:00:00')
+            const dtFim = new Date(dtInicio)
+            dtFim.setDate(dtFim.getDate() + resumo.prazoTotal - 1)
+            const diasRestantes = Math.round((dtLimite.getTime() - dtFim.getTime()) / 86400000)
+            const excede = diasRestantes < 0
+            const folga = Math.abs(diasRestantes)
+            return (
+              <div className={`flex items-start gap-3 rounded-2xl px-4 py-3 border ${excede ? 'bg-red-50 border-red-200 text-red-700' : 'bg-green-50 border-green-200 text-green-700'}`}>
+                <AlertCircle size={16} className="flex-shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-semibold text-sm">
+                    {excede
+                      ? `⚠️ Cronograma excede o prazo contratual em ${folga} dia${folga !== 1 ? 's' : ''}`
+                      : `✅ Cronograma dentro do prazo — folga de ${folga} dia${folga !== 1 ? 's' : ''}`}
+                  </p>
+                  <p className="text-xs mt-0.5 opacity-80">
+                    Entrega prevista: {dtFim.toLocaleDateString('pt-BR')} · Limite contratual: {dtLimite.toLocaleDateString('pt-BR')}
+                  </p>
+                </div>
+              </div>
+            )
+          })()}
 
           {/* Toolbar */}
           <div className="flex items-center justify-between flex-wrap gap-3">
